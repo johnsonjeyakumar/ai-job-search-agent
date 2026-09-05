@@ -1,0 +1,37 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Secrets & environment ---
+.env
+.env.*
+!.env.example
+
+# --- Node / frontend ---
+node_modules/
+dist/
+*.local
+
+# --- Local OpenCode config (contains local DB credentials) ---
+.opencode/
+
+# --- Local tooling output ---
+.playwright-mcp/
+
+# --- Uploaded files (local storage for development) ---
+storage/
+
+# --- Logs ---
+*.log
+
+# --- OS ---
+.DS_Store
+Thumbs.db
