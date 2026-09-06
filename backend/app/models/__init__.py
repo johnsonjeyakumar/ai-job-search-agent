@@ -3,6 +3,13 @@ from app.models.application import (
     FollowUp,
     RecruiterContact,
 )
+from app.models.application_package import (
+    ApplicationAnswer,
+    ApplicationEvidence,
+    ApplicationPackage,
+    ApplicationTailoringSuggestion,
+    ApplicationValidationFinding,
+)
 from app.models.automation import AutomationError, AutomationRun
 from app.models.company import Company
 from app.models.event import JobEvent
@@ -26,6 +33,11 @@ __all__ = [
     "Application",
     "RecruiterContact",
     "FollowUp",
+    "ApplicationPackage",
+    "ApplicationEvidence",
+    "ApplicationTailoringSuggestion",
+    "ApplicationAnswer",
+    "ApplicationValidationFinding",
     "AutomationRun",
     "AutomationError",
 ]

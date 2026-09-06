@@ -31,3 +31,57 @@ class AIProvider(ABC):
         Providers return ``None`` when they cannot contribute; the caller then
         falls back to the deterministic extractor.
         """
+
+    # -- Phase 6: application preparation ------------------------------------
+
+    @abstractmethod
+    async def draft_cover_letter(
+        self, job: Any, profile: Any, resume: Any
+    ) -> dict[str, Any] | None:
+        """Draft a cover-letter body ({'text': ...}) or ``None``.
+
+        The caller validates the response against ``AICoverLetter`` and falls
+        back deterministically; the LLM never decides the quality gate.
+        """
+
+    @abstractmethod
+    async def draft_application_answers(
+        self,
+        job: Any,
+        profile: Any,
+        resume: Any,
+        questions: list[dict[str, str]],
+    ) -> list[dict[str, Any]] | None:
+        """Draft answers for application questions, or ``None``.
+
+        Response items are validated against ``AIApplicationAnswer``; invalid
+        or score-tainted output is rejected and replaced deterministically.
+        """
+
+    @abstractmethod
+    async def suggest_tailoring(
+        self,
+        job: Any,
+        profile: Any,
+        resume: Any,
+        gaps: list[dict[str, Any]],
+    ) -> list[dict[str, Any]] | None:
+        """Suggest resume tailoring wording for gaps, or ``None``.
+
+        Response items are validated against ``AITailoringSuggestion``; the
+        deterministic fallback never invents new facts.
+        """
+
+    @abstractmethod
+    async def validate_application(
+        self,
+        job: Any,
+        profile: Any,
+        resume: Any,
+        package: dict[str, Any],
+    ) -> list[dict[str, Any]] | None:
+        """Return truth/consistency findings, or ``None``.
+
+        Findings are validated against ``AIValidationFinding``; they never
+        alter scores or protected profile facts.
+        """
