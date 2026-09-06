@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     apify_run_timeout_secs: int = 300
     apify_poll_interval_secs: int = 5
 
+    # Phase 4 deterministic quality scoring. Weights are fractions that sum
+    # to 1.0; freshness uses the same bands as the freshness service.
+    quality_score_weights: dict[str, float] = {
+        "freshness": 0.25,
+        "description": 0.20,
+        "requirements": 0.15,
+        "application": 0.15,
+        "company": 0.10,
+        "location": 0.10,
+        "salary": 0.05,
+    }
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

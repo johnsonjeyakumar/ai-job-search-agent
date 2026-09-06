@@ -44,6 +44,14 @@ class Job(Base):
     discovered_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
+    # System lifecycle timestamps (distinct from posted_date which is the
+    # employer's posting date).
+    first_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
     application_url: Mapped[str | None] = mapped_column(Text)
     company_url: Mapped[str | None] = mapped_column(Text)
 

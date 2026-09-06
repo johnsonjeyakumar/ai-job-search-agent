@@ -15,6 +15,39 @@ const REMOTE_OPTIONS = [
   { value: "hybrid", label: "Hybrid" },
   { value: "onsite", label: "On-site" },
 ];
+const FRESHNESS_OPTIONS = [
+  { value: "", label: "All freshness" },
+  { value: "VERY_FRESH", label: "Very fresh (0–3d)" },
+  { value: "FRESH", label: "Fresh (4–7d)" },
+  { value: "RECENT", label: "Recent (8–14d)" },
+  { value: "AGING", label: "Aging (15–30d)" },
+  { value: "STALE", label: "Stale (31d+)" },
+  { value: "UNKNOWN", label: "Unknown posting date" },
+];
+const SORT_OPTIONS = [
+  { value: "discovered", label: "Newest discovery" },
+  { value: "freshness_desc", label: "Freshest posting" },
+  { value: "quality_desc", label: "Highest quality" },
+  { value: "posted", label: "Latest posted date" },
+];
+
+const FRESHNESS_STYLES = {
+  VERY_FRESH: "bg-emerald-100 text-emerald-700",
+  FRESH: "bg-green-100 text-green-700",
+  RECENT: "bg-sky-100 text-sky-700",
+  AGING: "bg-amber-100 text-amber-700",
+  STALE: "bg-rose-100 text-rose-700",
+  UNKNOWN: "bg-slate-100 text-slate-500",
+};
+
+const FRESHNESS_LABELS = {
+  VERY_FRESH: "Very fresh",
+  FRESH: "Fresh",
+  RECENT: "Recent",
+  AGING: "Aging",
+  STALE: "Stale",
+  UNKNOWN: "Unknown",
+};
 
 function formatDate(value) {
   if (!value) return "—";
@@ -37,6 +70,27 @@ function Badge({ children }) {
   ) : null;
 }
 
+function FreshnessBadge({ freshness }) {
+  if (!freshness) return null;
+  const status = freshness.status || "UNKNOWN";
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${FRESHNESS_STYLES[status] || FRESHNESS_STYLES.UNKNOWN}`}
+    >
+      {FRESHNESS_LABELS[status] || "Unknown"}
+    </span>
+  );
+}
+
+function QualityChip({ quality }) {
+  if (!quality || typeof quality.overall_score !== "number") return null;
+  return (
+    <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+      Quality: {quality.overall_score}/100
+    </span>
+  );
+}
+
 function JobCard({ job }) {
   return (
     <Link
@@ -55,6 +109,8 @@ function JobCard({ job }) {
         <Badge>{job.source}</Badge>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
+        <FreshnessBadge freshness={job.freshness} />
+        <QualityChip quality={job.quality} />
         <Badge>{labelize(job.remote_type)}</Badge>
         <Badge>{labelize(job.employment_type)}</Badge>
         <Badge>{job.experience_required}</Badge>
@@ -75,7 +131,15 @@ export default function Jobs() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const [filters, setFilters] = useState({ role: "", location: "", source: "", remote_type: "" });
+  const [filters, setFilters] = useState(() => ({
+    role: "",
+    location: "",
+    source: "",
+    remote_type: "",
+    freshness: "",
+    sort: "discovered",
+    company: new URLSearchParams(window.location.search).get("company") || "",
+  }));
   const [showSearch, setShowSearch] = useState(false);
   const [searchForm, setSearchForm] = useState({ role: "", location: "", limit: 20 });
   const [run, setRun] = useState(null);
@@ -92,6 +156,9 @@ export default function Jobs() {
     if (filters.location.trim()) params.set("location", filters.location.trim());
     if (filters.source) params.set("source", filters.source);
     if (filters.remote_type) params.set("remote_type", filters.remote_type);
+    if (filters.freshness) params.set("freshness", filters.freshness);
+    if (filters.sort) params.set("sort", filters.sort);
+    if (filters.company.trim()) params.set("company", filters.company.trim());
     apiGet(`/jobs?${params.toString()}`)
       .then((body) => {
         setJobs(body.items);
@@ -144,7 +211,7 @@ export default function Jobs() {
     <div>
       <PageHeader
         title="Jobs"
-        description="Discovered jobs from connected sources. Use “Search for New Jobs” to import fresh listings."
+        description="Discovered jobs from connected sources. Freshness and quality scores are based on your collected jobs."
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -183,6 +250,31 @@ export default function Jobs() {
               </option>
             ))}
           </select>
+          <select
+            value={filters.freshness}
+            onChange={(e) => setFilters({ ...filters, freshness: e.target.value })}
+            className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:outline-none"
+          >
+            {FRESHNESS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium uppercase tracking-wide text-slate-400">Sort</label>
+          <select
+            value={filters.sort}
+            onChange={(e) => setFilters({ ...filters, sort: e.target.value })}
+            className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:outline-none"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
         <button
           type="button"
@@ -195,6 +287,21 @@ export default function Jobs() {
           {showSearch ? "Close" : "Search for New Jobs"}
         </button>
       </div>
+
+      {filters.company.trim() && (
+        <div className="mt-3 flex items-center gap-2">
+          <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white">
+            Company: {filters.company.trim()}
+          </span>
+          <button
+            type="button"
+            onClick={() => setFilters({ ...filters, company: "" })}
+            className="text-xs font-medium text-slate-600 hover:text-slate-900 hover:underline"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {showSearch && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

@@ -89,3 +89,29 @@ def client(db_engine):
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture
+def client_session(db_engine):
+    """TestClient plus the session used by ``get_db`` (shares one transaction).
+
+    Lets tests seed data through the API session (e.g. ``insert_jobs``) and
+    assert on responses from the same connection.
+    """
+    connection = db_engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection, join_transaction_mode="create_savepoint")
+
+    def override_get_db():
+        try:
+            yield session
+        finally:
+            pass
+
+    fastapi_app.dependency_overrides[get_db] = override_get_db
+    with TestClient(fastapi_app) as test_client:
+        yield test_client, session
+    fastapi_app.dependency_overrides.pop(get_db, None)
+    session.close()
+    transaction.rollback()
+    connection.close()

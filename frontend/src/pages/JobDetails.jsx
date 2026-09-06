@@ -8,6 +8,17 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function formatDateTime(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function labelize(value) {
   if (!value) return null;
   return value
@@ -60,6 +71,141 @@ function ListBlock({ title, items }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+const FRESHNESS_STYLES = {
+  VERY_FRESH: "bg-emerald-100 text-emerald-700",
+  FRESH: "bg-green-100 text-green-700",
+  RECENT: "bg-sky-100 text-sky-700",
+  AGING: "bg-amber-100 text-amber-700",
+  STALE: "bg-rose-100 text-rose-700",
+  UNKNOWN: "bg-slate-100 text-slate-500",
+};
+
+function Section({ title, children }) {
+  return (
+    <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function JobIntelligence({ freshness, quality }) {
+  if (!freshness && !quality) return null;
+  const status = freshness?.status || "UNKNOWN";
+  return (
+    <Section title="Job Intelligence">
+      <p className="mt-1 text-xs text-slate-400">Based on your collected jobs.</p>
+
+      <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Freshness</dt>
+          <dd className="mt-1">
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${FRESHNESS_STYLES[status]}`}>
+              {freshness?.explanation || "Undefined"}
+            </span>
+          </dd>
+        </div>
+        <Detail label="Age">{(freshness?.age_in_days ?? null) === null ? "Unknown" : `${freshness.age_in_days} days`}</Detail>
+        <Detail label="Quality score">{quality ? `${quality.overall_score}/100` : "—"}</Detail>
+        <Detail label="Scoring version">{quality?.scoring_version || "—"}</Detail>
+      </div>
+
+      {quality && (
+        <>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Object.entries(quality.components || {}).map(([key, component]) => (
+              <div key={key} className="rounded-md border border-slate-100 bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-slate-700">{component.label}</span>
+                  <span className="text-sm font-bold text-slate-900">
+                    {component.score ?? "—"}
+                    {component.score === null ? "" : "/100"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{component.message || "—"}</p>
+              </div>
+            ))}
+          </div>
+
+          {(quality.positive?.length > 0 || quality.negative?.length > 0) && (
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              {quality.positive?.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Positive signals</h4>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                    {quality.positive.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {quality.negative?.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-rose-600">Missing signals</h4>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                    {quality.negative.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
+function CompanyIntelligence({ company }) {
+  if (!company) return null;
+  return (
+    <Section title="Company Intelligence">
+      <p className="mt-1 text-xs text-slate-400">Based on your collected jobs.</p>
+      <dl className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <Detail label="Company">{company.display_name || company.normalized_name}</Detail>
+        <Detail label="Domain">{company.domain || "—"}</Detail>
+        <Detail label="Website">
+          {company.website ? (
+            <a href={company.website} target="_blank" rel="noopener noreferrer" className="text-slate-700 hover:underline">
+              {company.website}
+            </a>
+          ) : (
+            "—"
+          )}
+        </Detail>
+        <Detail label="Careers page">{company.careers_url || "—"}</Detail>
+        <Detail label="Industry">{company.industry || "Not collected"}</Detail>
+        <Detail label="Company size">{company.company_size || "Not collected"}</Detail>
+        <Detail label="Jobs observed">{company.active_job_count}</Detail>
+        <Detail label="Distinct roles">{company.distinct_role_count}</Detail>
+        <Detail label="Sources observed">{company.source_count}</Detail>
+        <Detail label="Last seen">{formatDate(company.last_seen_job_at)}</Detail>
+      </dl>
+    </Section>
+  );
+}
+
+function RecentActivity({ events }) {
+  const items = Array.isArray(events) ? events : [];
+  if (items.length === 0) return null;
+  return (
+    <Section title="Recent Activity">
+      <p className="mt-1 text-xs text-slate-400">Lifecycle events observed for this job.</p>
+      <ul className="mt-4 space-y-2">
+        {items.map((event) => (
+          <li key={event.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+              {labelize(event.event_type)}
+            </span>
+            <span className="text-xs text-slate-500">{formatDateTime(event.created_at)}</span>
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }
 
@@ -131,6 +277,10 @@ export default function JobDetails() {
           <ListBlock title="Skills" items={job.skills} />
         </div>
       </div>
+
+      <JobIntelligence freshness={job.freshness} quality={job.quality} />
+      <CompanyIntelligence company={job.company_info} />
+      <RecentActivity events={job.recent_events} />
     </div>
   );
 }

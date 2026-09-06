@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -10,10 +10,24 @@ from app.schemas.job import (
     JobRead,
     JobSearchRequest,
     JobSearchResponse,
+    JobStatsResponse,
 )
-from app.services import automation_service, job_service, search_service
+from app.services import (
+    automation_service,
+    job_intel,
+    job_service,
+    jobs_stats_service,
+    search_service,
+)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+FreshnessFilter = Literal[
+    "VERY_FRESH", "FRESH", "RECENT", "AGING", "STALE", "UNKNOWN"
+]
+SortOption = Literal[
+    "discovered", "posted", "freshness_desc", "freshness_asc", "quality_desc", "quality_asc"
+]
 
 
 @router.get("", response_model=JobListResponse)
@@ -25,6 +39,9 @@ def list_jobs(
     source: str | None = None,
     remote_type: str | None = None,
     posted_within_days: int | None = Query(default=None, ge=1),
+    company: str | None = None,
+    freshness: FreshnessFilter | None = None,
+    sort: SortOption = "discovered",
     db: Session = Depends(get_db),
 ) -> JobListResponse:
     items, total = job_service.list_jobs(
@@ -36,11 +53,20 @@ def list_jobs(
         source=source,
         remote_type=remote_type,
         posted_within_days=posted_within_days,
+        company=company,
+        freshness=freshness,
+        sort=sort,
     )
+    job_intel.enrich(db, items)
     pages = (total + limit - 1) // limit
     return JobListResponse(
         items=items, page=page, limit=limit, total=total, pages=pages
     )
+
+
+@router.get("/stats", response_model=JobStatsResponse)
+def job_stats(db: Session = Depends(get_db)) -> JobStatsResponse:
+    return jobs_stats_service.compute_stats(db)
 
 
 @router.get("/runs/{run_id}", response_model=AutomationRunRead)
@@ -95,4 +121,5 @@ def get_job(job_id: int, db: Session = Depends(get_db)) -> JobRead:
     job = job_service.get_job(db, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    job_intel.enrich(db, [job], companies=True, events=True)
     return job

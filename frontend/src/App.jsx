@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import { AppDataProvider } from "./context/AppDataContext.jsx";
 import Layout from "./components/Layout.jsx";
 import Applications from "./pages/Applications.jsx";
+import Companies from "./pages/Companies.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import JobDetails from "./pages/JobDetails.jsx";
 import Jobs from "./pages/Jobs.jsx";
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/jobs/:id" element={<JobDetails />} />
+          <Route path="/companies" element={<Companies />} />
           <Route path="/recommendations" element={<Recommendations />} />
           <Route path="/applications" element={<Applications />} />
           <Route path="/resumes" element={<Resumes />} />

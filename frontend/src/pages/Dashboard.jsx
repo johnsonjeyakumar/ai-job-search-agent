@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { apiGet } from "../api/client.js";
 import { useAppData } from "../context/AppDataContext.jsx";
 import PageHeader from "../components/PageHeader.jsx";
 import StatCard from "../components/StatCard.jsx";
@@ -10,6 +12,37 @@ const STATS = [
   { label: "Interviews", value: 0 },
   { label: "Rejections", value: 0 },
 ];
+
+const FRESHNESS_ROWS = [
+  { key: "very_fresh", label: "Very fresh", className: "bg-emerald-600" },
+  { key: "fresh", label: "Fresh", className: "bg-green-500" },
+  { key: "recent", label: "Recent", className: "bg-sky-500" },
+  { key: "aging", label: "Aging", className: "bg-amber-500" },
+  { key: "stale", label: "Stale", className: "bg-rose-500" },
+  { key: "unknown", label: "Unknown", className: "bg-slate-300" },
+];
+
+function FreshnessBars({ counts }) {
+  const values = FRESHNESS_ROWS.map((row) => ({ ...row, count: counts?.[row.key] ?? 0 }));
+  const total = values.reduce((sum, row) => sum + row.count, 0);
+  if (total === 0) return <p className="text-sm text-slate-500">No jobs yet — run a search to begin.</p>;
+  return (
+    <div>
+      <div>
+        {values.map((row) => (
+          <div key={row.key} className="flex items-center gap-2 py-1">
+            <span className="w-20 shrink-0 text-xs text-slate-500">{row.label}</span>
+            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+              <div className={`h-full ${row.className}`} style={{ width: `${(row.count / total) * 100}%` }} />
+            </div>
+            <span className="w-8 shrink-0 text-right text-xs font-medium text-slate-700">{row.count}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-400">Freshness of posting date across all collected jobs.</p>
+    </div>
+  );
+}
 
 function SetupCheck({ label, done }) {
   return (
@@ -28,6 +61,13 @@ function SetupCheck({ label, done }) {
 
 export default function Dashboard() {
   const { profile, preferences, resumes, health, loading } = useAppData();
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    apiGet("/jobs/stats")
+      .then(setStats)
+      .catch(() => {});
+  }, []);
 
   const profileDone = !!profile?.name && !!profile?.email;
   const resumeCount = resumes?.length || 0;
@@ -70,6 +110,64 @@ export default function Dashboard() {
         {STATS.map((stat) => (
           <StatCard key={stat.label} label={stat.label} value={stat.value} />
         ))}
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-900">Job Intelligence</h3>
+          <p className="mt-1 text-xs text-slate-500">Based on your collected jobs.</p>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatCard label="Jobs collected" value={stats?.total ?? 0} />
+            <StatCard label="Avg quality" value={stats?.avg_quality != null ? `${stats.avg_quality}/100` : "—"} />
+            <div className="flex items-center">
+              <Link to="/companies" className="text-xs font-medium text-slate-600 hover:underline">
+                View companies →
+              </Link>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-900">Freshness Overview</h3>
+          <p className="mt-1 text-xs text-slate-500">How recent the collected job postings are.</p>
+          <div className="mt-3">
+            <FreshnessBars counts={stats?.freshness_counts} />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="text-sm font-semibold text-slate-900">Top Companies</h3>
+        <p className="mt-1 text-xs text-slate-500">Employers with the most collected job postings.</p>
+        {stats?.top_companies?.length ? (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
+                  <th className="py-2 pr-4 font-medium">Company</th>
+                  <th className="py-2 pr-4 font-medium">Jobs</th>
+                  <th className="py-2 pr-4 font-medium">Roles</th>
+                  <th className="py-2 font-medium">Sources</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.top_companies.map((company, index) => (
+                  <tr key={`${company.id}-${index}`} className="border-b border-slate-100 last:border-0">
+                    <td className="py-2 pr-4 font-medium text-slate-700">
+                      <Link to="/companies" className="hover:underline">
+                        {company.display_name || company.normalized_name}
+                      </Link>
+                    </td>
+                    <td className="py-2 pr-4 text-slate-600">{company.active_job_count}</td>
+                    <td className="py-2 pr-4 text-slate-600">{company.distinct_role_count}</td>
+                    <td className="py-2 text-slate-600">{company.source_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-500">No companies observed yet.</p>
+        )}
       </div>
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
