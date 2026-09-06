@@ -14,13 +14,17 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.job_sources import normalizer as norm
-from app.models.job import Job
+from app.models.job import Job, JobMatch
+from app.models.opportunity import OpportunityScore
 from app.models.quality import JobQualityScore
 from app.services import (
     company_service,
     freshness_service,
     job_events_service,
     job_quality_service,
+    matches_service,
+    matching_service,
+    opportunity_service,
 )
 
 
@@ -38,6 +42,10 @@ VALID_SORTS = (
     "freshness_asc",
     "quality_desc",
     "quality_asc",
+    "match_desc",
+    "match_asc",
+    "opportunity_desc",
+    "opportunity_asc",
 )
 
 
@@ -53,6 +61,9 @@ def list_jobs(
     posted_within_days: int | None = None,
     company: str | None = None,
     freshness: str | None = None,
+    min_match_score: int | None = None,
+    min_opportunity_score: int | None = None,
+    recommendation: str | None = None,
     sort: str = "discovered",
 ) -> tuple[list[Job], int]:
     page = max(1, page)
@@ -85,6 +96,12 @@ def list_jobs(
             conditions.append(Job.posted_date.is_(None))
         else:
             conditions.extend(window)
+    if min_match_score is not None:
+        conditions.append(_current_match_subquery() >= min_match_score)
+    if min_opportunity_score is not None:
+        conditions.append(_current_opportunity_subquery() >= min_opportunity_score)
+    if recommendation:
+        conditions.append(_recommendation_exists(recommendation))
 
     order = _ordering(sort)
     query = select(Job)
@@ -114,10 +131,19 @@ def _ordering(sort: str):
             Job.posted_date.asc(),
             Job.id.desc(),
         ]
-    score = _current_score_subquery()
     if sort == "quality_desc":
+        score = _current_score_subquery()
         return [score.desc().nulls_last(), Job.id.desc()]
-    return [score.asc().nulls_last(), Job.id.desc()]
+    if sort == "quality_asc":
+        score = _current_score_subquery()
+        return [score.asc().nulls_last(), Job.id.desc()]
+    if sort == "match_desc":
+        return [_current_match_subquery().desc().nulls_last(), Job.id.desc()]
+    if sort == "match_asc":
+        return [_current_match_subquery().asc().nulls_last(), Job.id.desc()]
+    if sort == "opportunity_desc":
+        return [_current_opportunity_subquery().desc().nulls_last(), Job.id.desc()]
+    return [_current_opportunity_subquery().asc().nulls_last(), Job.id.desc()]
 
 
 def _current_score_subquery():
@@ -131,6 +157,46 @@ def _current_score_subquery():
         .order_by(JobQualityScore.calculated_at.desc())
         .limit(1)
         .scalar_subquery()
+    )
+
+
+def _current_match_subquery():
+    return (
+        select(JobMatch.match_score)
+        .where(
+            JobMatch.job_id == Job.id,
+            JobMatch.matching_version == matching_service.MATCHING_VERSION,
+        )
+        .order_by(JobMatch.calculated_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _current_opportunity_subquery():
+    return (
+        select(OpportunityScore.opportunity_score)
+        .where(
+            OpportunityScore.job_id == Job.id,
+            OpportunityScore.opportunity_version
+            == opportunity_service.OPPORTUNITY_VERSION,
+        )
+        .order_by(OpportunityScore.calculated_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _recommendation_exists(recommendation: str):
+    return (
+        select(OpportunityScore.id)
+        .where(
+            OpportunityScore.job_id == Job.id,
+            OpportunityScore.opportunity_version
+            == opportunity_service.OPPORTUNITY_VERSION,
+            OpportunityScore.recommendation == recommendation,
+        )
+        .exists()
     )
 
 
@@ -158,6 +224,7 @@ def insert_jobs(
     inserted = 0
     duplicates = 0
     invalid: list[dict[str, Any]] = []
+    inserted_jobs: list[Job] = []
 
     for record in records:
         record["source"] = source
@@ -190,8 +257,11 @@ def insert_jobs(
         )
         company_service.upsert_company_for_job(db, job, seen_at=now)
         job_quality_service.calculate(db, job, as_of=now, store=True)
+        inserted_jobs.append(job)
         inserted += 1
 
+    if inserted_jobs:
+        matches_service.ensure_decisions(db, inserted_jobs, force=True, commit=False)
     db.commit()
     return InsertResult(
         inserted=inserted,
@@ -219,6 +289,7 @@ def _refresh_existing(db: Session, job: Job, record: dict[str, Any]) -> None:
             created_at=now,
         )
         job_quality_service.calculate(db, job, as_of=now, store=True)
+        matches_service.ensure_decisions(db, [job], force=True, commit=False)
     elif job_events_service.is_reappeared(job, now):
         job_events_service.record_event(
             db,

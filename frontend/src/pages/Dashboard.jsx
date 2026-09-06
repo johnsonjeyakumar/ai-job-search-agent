@@ -44,6 +44,38 @@ function FreshnessBars({ counts }) {
   );
 }
 
+const RECOMMENDATION_ROWS = [
+  { key: "APPLY_NOW", label: "Apply now", className: "bg-emerald-600" },
+  { key: "APPLY", label: "Apply", className: "bg-green-500" },
+  { key: "REVIEW", label: "Review", className: "bg-amber-500" },
+  { key: "LOW_PRIORITY", label: "Low priority", className: "bg-orange-400" },
+  { key: "SKIP", label: "Skip", className: "bg-rose-500" },
+];
+
+function RecommendationBars({ counts }) {
+  const values = RECOMMENDATION_ROWS.map((row) => ({ ...row, count: counts?.[row.key] ?? 0 }));
+  const total = values.reduce((sum, row) => sum + row.count, 0);
+  if (total === 0) return <p className="text-sm text-slate-500">No evaluated jobs yet.</p>;
+  return (
+    <div>
+      <div>
+        {values.map((row) => (
+          <div key={row.key} className="flex items-center gap-2 py-1">
+            <span className="w-24 shrink-0 text-xs text-slate-500">{row.label}</span>
+            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+              <div className={`h-full ${row.className}`} style={{ width: `${(row.count / total) * 100}%` }} />
+            </div>
+            <span className="w-8 shrink-0 text-right text-xs font-medium text-slate-700">{row.count}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-400">
+        Final recommendations across {total} evaluated job{total === 1 ? "" : "s"}.
+      </p>
+    </div>
+  );
+}
+
 function SetupCheck({ label, done }) {
   return (
     <div className="flex items-center gap-2 text-sm">
@@ -110,6 +142,36 @@ export default function Dashboard() {
         {STATS.map((stat) => (
           <StatCard key={stat.label} label={stat.label} value={stat.value} />
         ))}
+      </div>
+
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Match Intelligence</h3>
+            <p className="mt-1 text-xs text-slate-500">How collected jobs fit your profile and preferences.</p>
+          </div>
+          <Link to="/recommendations" className="text-xs font-medium text-slate-600 hover:underline">
+            View recommendations →
+          </Link>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard label="Evaluated jobs" value={stats?.matches?.evaluated_jobs ?? 0} />
+          <StatCard
+            label="Avg match"
+            value={stats?.matches?.avg_match_score != null ? `${stats.matches.avg_match_score}/100` : "—"}
+          />
+          <StatCard
+            label="Avg opportunity"
+            value={stats?.matches?.avg_opportunity_score != null ? `${stats.matches.avg_opportunity_score}/100` : "—"}
+          />
+          <StatCard
+            label="Avg quality"
+            value={stats?.avg_quality != null ? `${stats.avg_quality}/100` : "—"}
+          />
+        </div>
+        <div className="mt-4">
+          <RecommendationBars counts={stats?.matches?.recommendation_counts} />
+        </div>
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">

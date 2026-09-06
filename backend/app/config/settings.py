@@ -50,6 +50,30 @@ class Settings(BaseSettings):
         "salary": 0.05,
     }
 
+    # Phase 5 personal matching weights. Fractions; components only measured
+    # when the job actually specifies them are normalized on read, so missing
+    # job signals are never turned into a penalty.
+    match_score_weights: dict[str, float] = {
+        "skills": 0.35,
+        "experience": 0.20,
+        "role": 0.15,
+        "location": 0.10,
+        "education": 0.08,
+        "remote": 0.05,
+        "employment_type": 0.03,
+        "salary": 0.02,
+        "certifications": 0.02,
+    }
+
+    # Phase 5 opportunity scoring: combines the personal match with the
+    # Phase 4 job-quality signals into a single decision score.
+    opportunity_score_weights: dict[str, float] = {
+        "match": 0.70,
+        "quality": 0.20,
+        "freshness": 0.05,
+        "company": 0.05,
+    }
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

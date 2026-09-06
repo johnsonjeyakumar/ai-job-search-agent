@@ -14,6 +14,7 @@ from app.services import (
     freshness_service,
     job_events_service,
     job_quality_service,
+    matches_service,
 )
 
 
@@ -27,9 +28,12 @@ def enrich(
     """Attach ``freshness``/``quality`` (and optionally ``company``/``events``)."""
     if not jobs:
         return jobs
+    matches_service.ensure_decisions(db, jobs)
     for job in jobs:
         job.freshness = freshness_service.classify(job.posted_date)
         job.quality = job_quality_service.calculate(db, job, store=True)
+        job.match = matches_service.match_view(db, job)
+        job.opportunity = matches_service.opportunity_view(db, job)
         if companies:
             job.company_info = company_service.company_view_for_job(db, job)
         if events:

@@ -57,7 +57,13 @@ class Job(Base):
 
 
 class JobMatch(Base):
-    """Transparent match result between a job and a profile."""
+    """Transparent match result between a job and a profile (Phase 5).
+
+    ``match_score`` is the personal match (profile fit). The match-tier
+    ``recommendation`` here is the derived band label for the match score
+    alone; the final decision (combining job quality) lives in
+    :class:`app.models.opportunity.OpportunityScore`.
+    """
 
     __tablename__ = "job_matches"
     __table_args__ = (
@@ -74,10 +80,24 @@ class JobMatch(Base):
     match_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     recommendation: Mapped[str] = mapped_column(
         String(20), default="review"
-    )  # apply | review | skip
+    )  # match-tier band: APPLY_NOW | APPLY | REVIEW | LOW_PRIORITY | SKIP
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    matching_version: Mapped[str] = mapped_column(
+        String(20), default="v1", index=True
+    )
+    context_key: Mapped[str | None] = mapped_column(String(64), index=True)
     criteria_breakdown: Mapped[dict] = mapped_column(JSONB, default=dict)
     matched_skills: Mapped[list] = mapped_column(JSONB, default=list)
     missing_skills: Mapped[list] = mapped_column(JSONB, default=list)
+    matched_requirements: Mapped[list] = mapped_column(JSONB, default=list)
+    partial_requirements: Mapped[list] = mapped_column(JSONB, default=list)
+    missing_requirements: Mapped[list] = mapped_column(JSONB, default=list)
+    unknown_requirements: Mapped[list] = mapped_column(JSONB, default=list)
+    evidence: Mapped[list] = mapped_column(JSONB, default=list)
+    explanation: Mapped[list] = mapped_column(JSONB, default=list)
+    calculated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

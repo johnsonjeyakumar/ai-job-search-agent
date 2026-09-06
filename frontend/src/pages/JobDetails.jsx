@@ -160,6 +160,182 @@ function JobIntelligence({ freshness, quality }) {
   );
 }
 
+const MATCH_STYLES = {
+  APPLY_NOW: "bg-emerald-100 text-emerald-800",
+  APPLY: "bg-green-100 text-green-800",
+  REVIEW: "bg-amber-100 text-amber-800",
+  LOW_PRIORITY: "bg-orange-100 text-orange-800",
+  SKIP: "bg-rose-100 text-rose-800",
+};
+
+const STATUS_STYLES = {
+  MATCHED: "text-emerald-700",
+  PARTIAL: "text-amber-700",
+  MISSING: "text-rose-700",
+  UNKNOWN: "text-slate-500",
+};
+
+function RequirementBucket({ title, items }) {
+  const values = Array.isArray(items) ? items : [];
+  if (values.length === 0) return null;
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {title} ({values.length})
+      </h4>
+      <ul className="mt-2 space-y-1 text-sm text-slate-700">
+        {values.map((item, index) => (
+          <li key={index} className="flex flex-wrap items-start justify-between gap-2">
+            <span>
+              {item.term}
+              {item.reason ? <span className="text-xs text-slate-400"> — {item.reason}</span> : null}
+            </span>
+            <span className={`text-xs font-medium ${STATUS_STYLES[item.status] || "text-slate-500"}`}>
+              {item.status}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MatchIntelligence({ match }) {
+  if (!match) return null;
+  const breakdown = match.criteria_breakdown || {};
+  const requirementBuckets = [
+    ["Matched requirements", match.matched_requirements],
+    ["Partial requirements", match.partial_requirements],
+    ["Missing requirements", match.missing_requirements],
+    ["Unknown requirements", match.unknown_requirements],
+  ];
+  return (
+    <Section title="Personal Match">
+      <p className="mt-1 text-xs text-slate-400">
+        How well this job fits your profile and preferences. Missing signals are excluded, never guessed.
+      </p>
+
+      <div className="mt-4 flex flex-wrap gap-3">
+        <div className="flex items-center gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <span className="text-3xl font-bold text-slate-900">
+            {match.match_score == null ? "—" : Math.round(match.match_score)}
+          </span>
+          <div>
+            <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${MATCH_STYLES[match.recommendation] || ""}`}>
+              {match.recommendation || "REVIEW"}
+            </span>
+            <p className="mt-1 text-xs text-slate-500">Confidence {Math.round((match.confidence_score || 0) * 100)}%</p>
+          </div>
+        </div>
+        <div className="grow rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Evidence</p>
+          <ul className="mt-1 list-disc pl-5 text-xs text-slate-600">
+            {(match.evidence || []).slice(0, 8).map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+            {(match.evidence || []).length === 0 && <li>No positive signals yet.</li>}
+          </ul>
+        </div>
+      </div>
+
+      {(match.blockers || []).length > 0 && (
+        <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-rose-600">Blockers — recommend skipping</h4>
+          <ul className="mt-1 list-disc pl-5 text-sm text-rose-700">
+            {match.blockers.map((blocker, index) => (
+              <li key={index}>{blocker}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {Object.entries(breakdown).map(([key, component]) => (
+          <div key={key} className="rounded-md border border-slate-100 bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-slate-700">{component.label || key}</span>
+              <span className={`text-sm font-bold ${STATUS_STYLES[component.status] || ""}`}>
+                {component.score == null ? component.status : `${Math.round(component.score)}/100`}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">{component.message || "—"}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-6 sm:grid-cols-2">
+        {requirementBuckets.map(([title, items]) => (
+          <RequirementBucket key={title} title={title} items={items} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function OpportunityIntelligence({ opportunity }) {
+  if (!opportunity) return null;
+  const explanation = opportunity.explanation || [];
+  const blockers = opportunity.blockers || [];
+  const rows = explanation.filter((entry) => entry.key !== "cap" && entry.key !== "blocker");
+  const caps = explanation.filter((entry) => entry.key === "cap");
+  return (
+    <Section title="Opportunity Score">
+      <p className="mt-1 text-xs text-slate-400">
+        Blends personal match with listing quality, freshness, and company signals for a final recommendation.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <span className="text-3xl font-bold text-slate-900">
+          {opportunity.opportunity_score == null ? "—" : Math.round(opportunity.opportunity_score)}
+        </span>
+        <span
+          className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${
+            MATCH_STYLES[opportunity.recommendation] || "border-slate-200 bg-slate-50 text-slate-700"
+          }`}
+        >
+          {opportunity.recommendation || "REVIEW"}
+        </span>
+        <span className="text-xs text-slate-400">v{opportunity.opportunity_version}</span>
+      </div>
+
+      {blockers.length > 0 && (
+        <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-rose-600">Blockers — skipping</h4>
+          <ul className="mt-1 list-disc pl-5 text-sm text-rose-700">
+            {blockers.map((blocker, index) => (
+              <li key={index}>{blocker}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        {rows.map((entry) => (
+          <div key={entry.key} className="rounded-md border border-slate-100 bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-slate-700">{entry.label}</span>
+              <span className="text-sm font-bold text-slate-900">
+                {entry.score == null ? "—" : `${Math.round(entry.score)}/100`}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              {entry.message} {entry.weight > 0 ? `· weight ${Math.round(entry.weight * 100)}%` : ""}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {caps.length > 0 && (
+        <ul className="mt-4 space-y-1 text-xs text-slate-500">
+          {caps.map((entry, index) => (
+            <li key={index}>• {entry.message}</li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
 function CompanyIntelligence({ company }) {
   if (!company) return null;
   return (
@@ -278,6 +454,8 @@ export default function JobDetails() {
         </div>
       </div>
 
+      <MatchIntelligence match={job.match} />
+      <OpportunityIntelligence opportunity={job.opportunity} />
       <JobIntelligence freshness={job.freshness} quality={job.quality} />
       <CompanyIntelligence company={job.company_info} />
       <RecentActivity events={job.recent_events} />

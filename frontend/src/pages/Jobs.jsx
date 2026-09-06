@@ -29,6 +29,18 @@ const SORT_OPTIONS = [
   { value: "freshness_desc", label: "Freshest posting" },
   { value: "quality_desc", label: "Highest quality" },
   { value: "posted", label: "Latest posted date" },
+  { value: "match_desc", label: "Best match" },
+  { value: "match_asc", label: "Worst match" },
+  { value: "opportunity_desc", label: "Best opportunity" },
+  { value: "opportunity_asc", label: "Worst opportunity" },
+];
+const RECOMMENDATION_OPTIONS = [
+  { value: "", label: "All recommendations" },
+  { value: "APPLY_NOW", label: "Apply now" },
+  { value: "APPLY", label: "Apply" },
+  { value: "REVIEW", label: "Review" },
+  { value: "LOW_PRIORITY", label: "Low priority" },
+  { value: "SKIP", label: "Skip" },
 ];
 
 const FRESHNESS_STYLES = {
@@ -91,6 +103,43 @@ function QualityChip({ quality }) {
   );
 }
 
+const MATCH_STYLES = {
+  APPLY_NOW: "bg-emerald-100 text-emerald-800",
+  APPLY: "bg-green-100 text-green-800",
+  REVIEW: "bg-amber-100 text-amber-800",
+  LOW_PRIORITY: "bg-orange-100 text-orange-800",
+  SKIP: "bg-rose-100 text-rose-800",
+};
+
+function RecommendationChip({ label, score, band, styles }) {
+  if (score == null) return null;
+  return (
+    <span
+      className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${
+        (styles || MATCH_STYLES)[band] || "border-slate-200 bg-slate-50 text-slate-700"
+      }`}
+    >
+      {label}: {Math.round(score)} · {band}
+    </span>
+  );
+}
+
+function MatchChip({ match }) {
+  if (!match || match.match_score == null) return null;
+  return <RecommendationChip label="Match" score={match.match_score} band={match.recommendation} />;
+}
+
+function OpportunityChip({ opportunity }) {
+  if (!opportunity) return null;
+  return (
+    <RecommendationChip
+      label="Opportunity"
+      score={opportunity.opportunity_score}
+      band={opportunity.recommendation}
+    />
+  );
+}
+
 function JobCard({ job }) {
   return (
     <Link
@@ -109,6 +158,8 @@ function JobCard({ job }) {
         <Badge>{job.source}</Badge>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
+        <MatchChip match={job.match} />
+        <OpportunityChip opportunity={job.opportunity} />
         <FreshnessBadge freshness={job.freshness} />
         <QualityChip quality={job.quality} />
         <Badge>{labelize(job.remote_type)}</Badge>
@@ -137,6 +188,8 @@ export default function Jobs() {
     source: "",
     remote_type: "",
     freshness: "",
+    recommendation: "",
+    min_score: "",
     sort: "discovered",
     company: new URLSearchParams(window.location.search).get("company") || "",
   }));
@@ -157,6 +210,11 @@ export default function Jobs() {
     if (filters.source) params.set("source", filters.source);
     if (filters.remote_type) params.set("remote_type", filters.remote_type);
     if (filters.freshness) params.set("freshness", filters.freshness);
+    if (filters.recommendation) params.set("recommendation", filters.recommendation);
+    if (filters.min_score !== "" && Number(filters.min_score) > 0) {
+      params.set("min_match_score", String(Number(filters.min_score)));
+      params.set("min_opportunity_score", String(Number(filters.min_score)));
+    }
     if (filters.sort) params.set("sort", filters.sort);
     if (filters.company.trim()) params.set("company", filters.company.trim());
     apiGet(`/jobs?${params.toString()}`)
@@ -211,7 +269,7 @@ export default function Jobs() {
     <div>
       <PageHeader
         title="Jobs"
-        description="Discovered jobs from connected sources. Freshness and quality scores are based on your collected jobs."
+        description="Discovered jobs with personal match, opportunity score, and recommendation. Scores use your profile and preferences; missing signals are shown as unknown."
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -261,6 +319,24 @@ export default function Jobs() {
               </option>
             ))}
           </select>
+          <select
+            value={filters.recommendation}
+            onChange={(e) => setFilters({ ...filters, recommendation: e.target.value })}
+            className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:outline-none"
+          >
+            {RECOMMENDATION_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <input
+            value={filters.min_score}
+            onChange={(e) => setFilters({ ...filters, min_score: e.target.value })}
+            placeholder="Min score"
+            inputMode="numeric"
+            className="w-24 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-slate-900 focus:outline-none"
+          />
         </div>
         <div className="flex items-center gap-2">
           <label className="text-xs font-medium uppercase tracking-wide text-slate-400">Sort</label>

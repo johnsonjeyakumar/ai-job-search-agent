@@ -20,3 +20,6 @@ class MockAIProvider(AIProvider):
 
     async def answer_question(self, job: Any, profile: Any, question: str) -> str:
         return ""
+
+    async def extract_job_requirements(self, job: Any) -> dict[str, Any] | None:
+        return None

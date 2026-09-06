@@ -23,3 +23,11 @@ class AIProvider(ABC):
     @abstractmethod
     async def answer_question(self, job: Any, profile: Any, question: str) -> str:
         """Answer an application question using the profile."""
+
+    @abstractmethod
+    async def extract_job_requirements(self, job: Any) -> dict[str, Any] | None:
+        """Extract structured job requirements from unstructured text.
+
+        Providers return ``None`` when they cannot contribute; the caller then
+        falls back to the deterministic extractor.
+        """

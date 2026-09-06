@@ -12,11 +12,13 @@ from app.schemas.job import (
     JobSearchResponse,
     JobStatsResponse,
 )
+from app.schemas.match import MatchRead, OpportunityRead
 from app.services import (
     automation_service,
     job_intel,
     job_service,
     jobs_stats_service,
+    matches_service,
     search_service,
 )
 
@@ -25,8 +27,20 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 FreshnessFilter = Literal[
     "VERY_FRESH", "FRESH", "RECENT", "AGING", "STALE", "UNKNOWN"
 ]
+RecommendationFilter = Literal[
+    "APPLY_NOW", "APPLY", "REVIEW", "LOW_PRIORITY", "SKIP"
+]
 SortOption = Literal[
-    "discovered", "posted", "freshness_desc", "freshness_asc", "quality_desc", "quality_asc"
+    "discovered",
+    "posted",
+    "freshness_desc",
+    "freshness_asc",
+    "quality_desc",
+    "quality_asc",
+    "match_desc",
+    "match_asc",
+    "opportunity_desc",
+    "opportunity_asc",
 ]
 
 
@@ -41,6 +55,9 @@ def list_jobs(
     posted_within_days: int | None = Query(default=None, ge=1),
     company: str | None = None,
     freshness: FreshnessFilter | None = None,
+    min_match_score: Annotated[int | None, Query(ge=0, le=100)] = None,
+    min_opportunity_score: Annotated[int | None, Query(ge=0, le=100)] = None,
+    recommendation: RecommendationFilter | None = None,
     sort: SortOption = "discovered",
     db: Session = Depends(get_db),
 ) -> JobListResponse:
@@ -55,6 +72,9 @@ def list_jobs(
         posted_within_days=posted_within_days,
         company=company,
         freshness=freshness,
+        min_match_score=min_match_score,
+        min_opportunity_score=min_opportunity_score,
+        recommendation=recommendation,
         sort=sort,
     )
     job_intel.enrich(db, items)
@@ -123,3 +143,29 @@ def get_job(job_id: int, db: Session = Depends(get_db)) -> JobRead:
         raise HTTPException(status_code=404, detail="Job not found")
     job_intel.enrich(db, [job], companies=True, events=True)
     return job
+
+
+@router.get("/{job_id}/match", response_model=MatchRead)
+def get_job_match(job_id: int, db: Session = Depends(get_db)) -> MatchRead:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    matches_service.ensure_decisions(db, [job])
+    match_row = matches_service.match_view(db, job)
+    if match_row is None:
+        raise HTTPException(status_code=404, detail="Match not computed")
+    return MatchRead.model_validate(match_row)
+
+
+@router.get("/{job_id}/opportunity", response_model=OpportunityRead)
+def get_job_opportunity(
+    job_id: int, db: Session = Depends(get_db)
+) -> OpportunityRead:
+    job = job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    matches_service.ensure_decisions(db, [job])
+    opp_row = matches_service.opportunity_view(db, job)
+    if opp_row is None:
+        raise HTTPException(status_code=404, detail="Opportunity not computed")
+    return OpportunityRead.model_validate(opp_row)

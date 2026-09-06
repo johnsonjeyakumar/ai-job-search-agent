@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.models.job import Job
 from app.models.quality import JobQualityScore
-from app.services import company_service, freshness_service, job_quality_service
+from app.services import (
+    company_service,
+    freshness_service,
+    job_quality_service,
+    matches_service,
+)
 
 FRESHNESS_STATUSES = (
     "very_fresh",
@@ -41,5 +46,6 @@ def compute_stats(db: Session) -> dict:
         "freshness_counts": freshness_counts,
         "avg_quality": int(avg) if avg is not None else None,
         "top_companies": company_service.top_companies(db, limit=5),
+        "matches": matches_service.stats_summary(db),
         "computed_at": datetime.now(timezone.utc),
     }

@@ -2,6 +2,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.match import MatchesStatsRead, MatchRead, OpportunityRead
+
 
 class FreshnessRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -92,6 +94,8 @@ class JobRead(JobBase):
     last_seen_at: datetime | None = None
     freshness: FreshnessRead | None = None
     quality: QualityRead | None = None
+    match: MatchRead | None = None
+    opportunity: OpportunityRead | None = None
     company_info: CompanyRead | None = None
     recent_events: list[JobEventRead] = Field(default_factory=list)
 
@@ -109,6 +113,7 @@ class JobStatsResponse(BaseModel):
     freshness_counts: dict[str, int]
     avg_quality: int | None
     top_companies: list[dict]
+    matches: MatchesStatsRead = Field(default_factory=MatchesStatsRead)
     computed_at: datetime
 
 
