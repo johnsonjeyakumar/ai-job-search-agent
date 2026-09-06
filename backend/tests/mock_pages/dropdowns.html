@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Acme Corp — Application</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 3rem auto; color: #0f172a; }
+    h1 { font-size: 1.25rem; }
+    label { display: block; margin-top: 0.9rem; font-size: 0.85rem; font-weight: 600; }
+    input, select { width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #cbd5e1; border-radius: 6px; }
+    button { margin-top: 1.25rem; background: #0f172a; color: #fff; padding: 0.6rem 1.25rem; border: 0; border-radius: 6px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Acme Corp — Application Form</h1>
+  <p style="font-size:0.85rem;color:#475569">Mock page with select dropdowns (scenario: dropdowns).</p>
+  <form id="application">
+    <label>First Name <input id="f1" name="first_name" required /></label>
+    <label>Last Name <input id="f2" name="last_name" required /></label>
+    <label>Email <input id="f3" name="email" type="email" required /></label>
+    <label>Phone <input id="f4" name="phone" /></label>
+    <label>City <input id="f5" name="city" /></label>
+    <label>Country <input id="f6" name="country" /></label>
+    <label>Skills <input id="f7" name="skills" /></label>
+    <label>Experience
+      <select id="f8" name="experience">
+        <option value="">Select</option>
+        <option>0-2 years</option>
+        <option>3-5 years</option>
+      </select>
+    </label>
+    <label>Notice Period
+      <select id="f9" name="notice_period">
+        <option value="">Select</option>
+        <option>Immediate</option>
+        <option>30 days</option>
+        <option>60 days</option>
+      </select>
+    </label>
+    <label>Gender
+      <select id="d1" name="gender" required>
+        <option value="">Select</option>
+        <option>Male</option>
+        <option>Female</option>
+        <option>Other</option>
+      </select>
+    </label>
+    <label>Work Authorization
+      <select id="d2" name="work_authorization" required>
+        <option value="">Select</option>
+        <option>Authorized to work in India.</option>
+      </select>
+    </label>
+    <label>Employment Type
+      <select id="d3" name="employment_type">
+        <option value="">Select</option>
+        <option>Full-time</option>
+        <option>Contract</option>
+      </select>
+    </label>
+    <label>Relocation
+      <select id="d4" name="relocation" required>
+        <option value="">Select</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+    </label>
+    <button id="submit" type="submit">Submit application</button>
+  </form>
+  <script>
+    document.getElementById("application").addEventListener("submit", function (ev) { ev.preventDefault(); });
+  </script>
+</body>
+</html>

@@ -31,6 +31,12 @@ class Preferences(Base):
     include_keywords: Mapped[list] = mapped_column(JSONB, default=list)
     exclude_keywords: Mapped[list] = mapped_column(JSONB, default=list)
 
+    # Phase 7 execution controls (user-configurable, not hard-coded).
+    daily_application_target: Mapped[int | None] = mapped_column(Integer)
+    daily_application_maximum: Mapped[int | None] = mapped_column(Integer)
+    # {"linkedin": "HUMAN_ASSISTED", "indeed": "PERMITTED_BROWSER", ...}
+    platform_policies: Mapped[dict] = mapped_column(JSONB, default=dict)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

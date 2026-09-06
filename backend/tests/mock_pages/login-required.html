@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Sign in required</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; color: #0f172a; }
+    h1 { font-size: 1.25rem; }
+    label { display: block; margin-top: 0.9rem; font-size: 0.85rem; font-weight: 600; }
+    input { width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #cbd5e1; border-radius: 6px; }
+    button { margin-top: 1.25rem; background: #0f172a; color: #fff; padding: 0.6rem 1.25rem; border: 0; border-radius: 6px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Sign in to apply</h1>
+  <p style="font-size:0.85rem;color:#475569">Mock page requiring authentication (scenario: login-required). The engine never fills credentials or bypasses login.</p>
+  <form id="login">
+    <label>Username <input id="u" name="username" required /></label>
+    <label>Password <input id="p" name="password" type="password" required /></label>
+    <button id="signin" type="submit">Sign in</button>
+  </form>
+  <script>
+    document.getElementById("login").addEventListener("submit", function (ev) { ev.preventDefault(); });
+  </script>
+</body>
+</html>

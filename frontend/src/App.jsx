@@ -4,6 +4,7 @@ import Layout from "./components/Layout.jsx";
 import Applications from "./pages/Applications.jsx";
 import Companies from "./pages/Companies.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
+import ExecutionPage from "./pages/ExecutionPage.jsx";
 import JobDetails from "./pages/JobDetails.jsx";
 import Jobs from "./pages/Jobs.jsx";
 import Logs from "./pages/Logs.jsx";
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/companies" element={<Companies />} />
           <Route path="/recommendations" element={<Recommendations />} />
           <Route path="/applications" element={<Applications />} />
+          <Route path="/applications/:id/execute" element={<ExecutionPage />} />
           <Route path="/resumes" element={<Resumes />} />
           <Route path="/recruiters" element={<Recruiters />} />
           <Route path="/profile" element={<Profile />} />

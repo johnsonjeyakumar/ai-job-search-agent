@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Acme Corp — Application</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 3rem auto; color: #0f172a; }
+    h1 { font-size: 1.25rem; }
+    label { display: block; margin-top: 0.9rem; font-size: 0.85rem; font-weight: 600; }
+    input, select, textarea { width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #cbd5e1; border-radius: 6px; }
+    button { margin-top: 1.25rem; background: #0f172a; color: #fff; padding: 0.6rem 1.25rem; border: 0; border-radius: 6px; cursor: pointer; }
+    .ok { margin-top: 1rem; border: 1px solid #059669; background: #ecfdf5; color: #065f46; padding: 0.75rem; border-radius: 6px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Acme Corp — Application Form</h1>
+  <p style="font-size:0.85rem;color:#475569">Mock page for the job-agent execution engine (scenario: simple-form).</p>
+  <form id="application" method="post">
+    <label>First Name <input id="f1" name="first_name" required /></label>
+    <label>Last Name <input id="f2" name="last_name" required /></label>
+    <label>Email <input id="f3" name="email" type="email" required /></label>
+    <label>Phone <input id="f4" name="phone" /></label>
+    <label>City <input id="f5" name="city" /></label>
+    <label>Country <input id="f6" name="country" /></label>
+    <label>Skills <input id="f7" name="skills" /></label>
+    <label>Experience
+      <select id="f8" name="experience_level">
+        <option value="fresher">0-2 years</option>
+        <option value="mid">3-5 years</option>
+        <option value="senior">6+ years</option>
+      </select>
+    </label>
+    <label>Notice Period <input id="f9" name="notice_period" /></label>
+    <button id="submit" type="submit">Submit application</button>
+  </form>
+  <div id="result" class="ok" style="display:none"></div>
+  <script>
+    document.getElementById("application").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var firstName = document.getElementById("f2").value;
+      var lastName = document.getElementById("f2").value;
+      document.getElementById("result").textContent =
+        "Application submitted. Confirmation reference: REF-SIMPLE-FORM (received by " + (firstName || "").trim() + ").";
+      document.getElementById("result").style.display = "block";
+    });
+  </script>
+</body>
+</html>

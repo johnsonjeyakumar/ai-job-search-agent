@@ -3,6 +3,11 @@ from app.models.application import (
     FollowUp,
     RecruiterContact,
 )
+from app.models.application_execution import (
+    ApplicationExecution,
+    ApplicationExecutionEvidence,
+    ApplicationExecutionStep,
+)
 from app.models.application_package import (
     ApplicationAnswer,
     ApplicationEvidence,
@@ -38,6 +43,9 @@ __all__ = [
     "ApplicationTailoringSuggestion",
     "ApplicationAnswer",
     "ApplicationValidationFinding",
+    "ApplicationExecution",
+    "ApplicationExecutionStep",
+    "ApplicationExecutionEvidence",
     "AutomationRun",
     "AutomationError",
 ]

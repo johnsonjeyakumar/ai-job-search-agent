@@ -37,6 +37,12 @@ class PreferencesBase(BaseModel):
     include_keywords: list[str] = Field(default_factory=list)
     exclude_keywords: list[str] = Field(default_factory=list)
 
+    # Phase 7 application execution controls.
+    daily_application_target: int | None = Field(default=None, ge=0)
+    daily_application_maximum: int | None = Field(default=None, ge=0)
+    # {"platform": "AUTHORIZED_AUTOMATION|PERMITTED_BROWSER|HUMAN_ASSISTED|UNSUPPORTED"}
+    platform_policies: dict = Field(default_factory=dict)
+
 
 class PreferencesUpdate(PreferencesBase):
     """Same as base — every field is optional in practice because PUT replaces."""
