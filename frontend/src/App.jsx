@@ -8,6 +8,7 @@ import ApplicationTracking from "./pages/ApplicationTracking.jsx";
 import Companies from "./pages/Companies.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import ExecutionPage from "./pages/ExecutionPage.jsx";
+import InterviewWorkspace from "./pages/InterviewWorkspace.jsx";
 import JobDetails from "./pages/JobDetails.jsx";
 import Jobs from "./pages/Jobs.jsx";
 import Logs from "./pages/Logs.jsx";
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/applications/packages" element={<Applications />} />
           <Route path="/applications/track/:id" element={<ApplicationTracking />} />
           <Route path="/applications/:id/execute" element={<ExecutionPage />} />
+          <Route path="/applications/:id/interview" element={<InterviewWorkspace />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/resumes" element={<Resumes />} />
           <Route path="/recruiters" element={<Recruiters />} />

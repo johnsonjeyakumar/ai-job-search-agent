@@ -162,6 +162,11 @@ export default function ApplicationTracking() {
       </Link>
 
       <PageHeader title={app.job_title} description={app.company} />
+      <div className="mb-4">
+        <Link to={`/applications/${id}/interview`} className="text-sm text-purple-600 hover:text-purple-800 font-medium">
+          Interview Workspace →
+        </Link>
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">

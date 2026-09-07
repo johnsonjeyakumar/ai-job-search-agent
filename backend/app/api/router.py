@@ -5,6 +5,7 @@ from app.api.routes import (
     applications,
     companies,
     health,
+    interview,
     jobs,
     preferences,
     profile,
@@ -21,4 +22,5 @@ api_router.include_router(jobs.router)
 api_router.include_router(companies.router)
 api_router.include_router(applications.router)
 api_router.include_router(tracking.router)
+api_router.include_router(interview.router)
 api_router.include_router(analytics.router)

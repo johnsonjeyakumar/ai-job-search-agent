@@ -24,6 +24,12 @@ from app.models.application_tracking import (
 from app.models.automation import AutomationError, AutomationRun
 from app.models.company import Company
 from app.models.event import JobEvent
+from app.models.interview import (
+    Interview,
+    InterviewPrepItem,
+    InterviewQuestion,
+    InterviewSession,
+)
 from app.models.job import Job, JobMatch
 from app.models.opportunity import OpportunityScore
 from app.models.preferences import Preferences
@@ -58,4 +64,8 @@ __all__ = [
     "OfferRecord",
     "AutomationRun",
     "AutomationError",
+    "Interview",
+    "InterviewQuestion",
+    "InterviewSession",
+    "InterviewPrepItem",
 ]

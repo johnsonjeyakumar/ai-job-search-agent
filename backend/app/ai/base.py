@@ -85,3 +85,41 @@ class AIProvider(ABC):
         Findings are validated against ``AIValidationFinding``; they never
         alter scores or protected profile facts.
         """
+
+    # -- Phase 10: interview preparation ------------------------------------
+
+    @abstractmethod
+    async def generate_interview_questions(
+        self,
+        job: Any,
+        profile: Any,
+        resume: Any,
+        categories: list[str],
+        count: int,
+    ) -> list[dict[str, Any]] | None:
+        """Generate interview questions from job/resume context, or ``None``.
+
+        Questions are validated against ``AIInterviewQuestion``; the
+        deterministic fallback never invents new facts.
+        """
+
+    @abstractmethod
+    async def evaluate_interview_answer(
+        self,
+        question: str,
+        answer: str,
+        category: str,
+    ) -> dict[str, Any] | None:
+        """Evaluate a mock interview answer, or ``None``.
+
+        Returns qualitative feedback only — never application status changes.
+        """
+
+    @abstractmethod
+    async def generate_interview_prep_summary(
+        self,
+        job: Any,
+        profile: Any,
+        interview_context: dict[str, Any],
+    ) -> str | None:
+        """Generate a brief interview prep summary, or ``None``."""

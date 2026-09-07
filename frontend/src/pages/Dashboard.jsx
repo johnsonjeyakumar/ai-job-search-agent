@@ -321,6 +321,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [funnel, setFunnel] = useState(null);
   const [followUps, setFollowUps] = useState(null);
+  const [upcomingInterviews, setUpcomingInterviews] = useState([]);
 
   useEffect(() => {
     apiGet("/jobs/stats")
@@ -338,6 +339,24 @@ export default function Dashboard() {
   };
 
   useEffect(refreshFollowUps, []);
+
+  useEffect(() => {
+    apiGet("/tracking/applications?status=INTERVIEW&sort=newest")
+      .then(async (resp) => {
+        const items = resp.items || [];
+        const upcoming = [];
+        for (const app of items.slice(0, 5)) {
+          try {
+            const ints = await apiGet(`/interviews/applications/${app.id}/interviews`);
+            for (const i of (ints.items || []).filter(x => x.status === "SCHEDULED")) {
+              upcoming.push({ ...i, company: app.company, role: app.role, application_id: app.id });
+            }
+          } catch { /* skip */ }
+        }
+        setUpcomingInterviews(upcoming);
+      })
+      .catch(() => {});
+  }, []);
 
   const profileDone = !!profile?.name && !!profile?.email;
   const resumeCount = resumes?.length || 0;
@@ -474,6 +493,25 @@ export default function Dashboard() {
           <p className="mt-3 text-sm text-slate-500">No companies observed yet.</p>
         )}
       </div>
+
+      {upcomingInterviews.length > 0 && (
+        <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-900">Upcoming Interviews</h3>
+          <p className="mt-1 text-xs text-slate-500">Scheduled interviews across your applications.</p>
+          <div className="mt-3 space-y-2">
+            {upcomingInterviews.map((i) => (
+              <Link key={i.id} to={`/applications/${i.application_id}/interview`}
+                className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition">
+                <div>
+                  <span className="text-sm font-medium text-slate-800">{i.company} — {i.role}</span>
+                  <span className="text-xs text-slate-500 ml-2">Round {i.round} ({i.interview_type})</span>
+                </div>
+                <span className="text-xs text-sky-600">{i.scheduled_at ? new Date(i.scheduled_at).toLocaleDateString() : "No date"}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="text-sm font-semibold text-slate-900">Backend Status</h3>

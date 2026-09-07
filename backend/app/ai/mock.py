@@ -41,3 +41,18 @@ class MockAIProvider(AIProvider):
         self, job: Any, profile: Any, resume: Any, package: dict[str, Any]
     ) -> list[dict] | None:
         return None
+
+    async def generate_interview_questions(
+        self, job: Any, profile: Any, resume: Any, categories: list[str], count: int
+    ) -> list[dict] | None:
+        return None
+
+    async def evaluate_interview_answer(
+        self, question: str, answer: str, category: str
+    ) -> dict | None:
+        return None
+
+    async def generate_interview_prep_summary(
+        self, job: Any, profile: Any, interview_context: dict[str, Any]
+    ) -> str | None:
+        return None
