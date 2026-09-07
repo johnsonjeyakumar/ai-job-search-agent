@@ -148,7 +148,17 @@ def update_interview(
         db.commit()
     except Exception as exc:
         raise _handle(exc) from exc
-    return {"message": "Interview updated.", "interview_id": i.id}
+    return {
+        "message": "Interview updated.",
+        "interview_id": i.id,
+        "notes": i.notes,
+        "scheduled_at": str(i.scheduled_at) if i.scheduled_at else None,
+        "interview_type": i.interview_type,
+        "interviewer_name": i.interviewer_name,
+        "interviewer_role": i.interviewer_role,
+        "meeting_url": i.meeting_url,
+        "location": i.location,
+    }
 
 
 @router.post("/{interview_id}/status")

@@ -176,6 +176,27 @@ class TestInterviewCRUD:
         assert get_resp.json()["interviewer_name"] == "John Doe"
         assert get_resp.json()["location"] == "Conference Room A"
 
+    def test_update_interview_notes_returns_in_response(self, client_session):
+        client, db = client_session
+        profile = _seed_profile(db)
+        resume = _seed_resume(db, profile)
+        job = _seed_job(db)
+        app = _seed_app_at_status(db, job, profile, resume, "SUBMISSION_CONFIRMED")
+        db.commit()
+
+        create_resp = client.post(f"/interviews/applications/{app.id}/interviews", json={
+            "interview_type": "TECHNICAL", "round_number": 1,
+        })
+        int_id = create_resp.json()["interview_id"]
+
+        resp = client.patch(f"/interviews/{int_id}", json={
+            "notes": "Updated via PATCH",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["notes"] == "Updated via PATCH"
+        assert data["interview_id"] == int_id
+
     def test_complete_interview(self, client_session):
         client, db = client_session
         profile = _seed_profile(db)
