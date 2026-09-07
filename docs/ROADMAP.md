@@ -3,64 +3,96 @@
 Phase plan. Each phase ends verified (tests + running servers + git check) before
 the next begins. No phase auto-starts.
 
-## Phase 1 — Foundation ✅ (current)
+## Phase 1 — Foundation ✅
 
 - [x] Inspection (existing files, environment, DB availability)
 - [x] Security files: `.env`, `.env.example`, `.gitignore` (credentials untracked)
 - [x] Backend scaffold: FastAPI + SQLAlchemy + Alembic + Pydantic
-- [x] DB integration layer + initial migration (9 domain tables + `alembic_version`)
+- [x] DB integration layer + initial migration (domain tables + `alembic_version`)
 - [x] Profile / Resume / Job / Application / Recruiter / Follow-up / Automation models
 - [x] API: `GET /health`, `GET/POST /profile`, `GET /resumes`, `GET /jobs`, `GET /applications`
-- [x] Frontend scaffold: React + Vite + Tailwind dashboard shell (9 nav sections,
+- [x] Frontend scaffold: React + Vite + Tailwind dashboard shell (nav sections,
       placeholder stats, backend/DB health indicator)
 - [x] AI / agent / job-source abstraction layers (stubs, provider-agnostic)
 - [x] Tests: health, DB connection, schema-migrated, profile API & validation,
       profile & job schema validation, job model mapping — all passing
 - [x] Verified: backend server, frontend server, API endpoints, DB, browser render
 
-## Phase 2 — Profile & Preferences
+## Phase 2 — Profile & Preferences ✅
 
-- Profile CRUD UI + editable settings
-- Resume upload / versioning / active-marking
-- Job-search preferences as editable stored settings (locations, roles, experience,
-  remote, salary) — no hard-coded values
-- Onboarding flow (first profile, preferred roles/locations)
+- [x] Profile CRUD UI + editable settings
+- [x] Resume upload / versioning / active-marking
+- [x] Job-search preferences as editable stored settings (locations, roles,
+      experience, remote, salary) — no hard-coded values
+- [x] Onboarding flow (first profile, preferred roles/locations)
 
-## Phase 3 — Job Discovery
+## Phase 3 — Job Discovery (Apify) ✅
 
-- Apify source adapter(s) implementing `JobSource`
-- Normalization + dedupe (`source` + `source_job_id` unique)
-- Manual run + scheduled discovery with `automation_runs` logging
-- Jobs list UI with filters and pagination
+- [x] Apify source adapter implementing `JobSource`
+- [x] Normalization + dedupe (`source` + `source_job_id` unique)
+- [x] Manual run via `POST /jobs/search` with `automation_runs` logging
+- [x] Jobs list UI with filters and pagination
 
-## Phase 4 — Matching & Recommendations
+## Phase 4 — Job Intelligence ✅
 
-- `AIProvider` concrete implementation (provider selected via `AI_PROVIDER`)
-- Transparent match scoring → `job_matches` (score, breakdown, matched/missing skills)
-- APPLY / REVIEW / SKIP recommendations with explainability
-- Recommendations UI
+- [x] Deterministic job-quality scoring (freshness, description, requirements,
+      application, company, location, salary) with component explanations
+- [x] `GET /jobs/{id}/match` and scoring plumbing; stats on the jobs list
+- [x] Quality gates feed later phases; backfill script `app/scripts/phase4_backfill.py`
 
-## Phase 5 — Applications & Preparation
+## Phase 5 — Personal Matching & Opportunity Scoring ✅
 
-- Application tracking CRUD + whole lifecycle UI (applied, interviewing, offer, etc.)
-- Tailored resume selection per job
-- AI answer generation + cover letter drafts (always reviewable)
+- [x] `AIProvider` concrete layer with a strict output contract (the LLM may never
+      emit scores — anything out of contract is rejected wholesale)
+- [x] Transparent match scoring → `job_matches` (score, breakdown, matched/missing
+      skills, blockers)
+- [x] Opportunity score blending match + quality + freshness + company signals
+- [x] APPLY / REVIEW / SKIP-style recommendations with explainability
+- [x] Recommendations UI + Match/Opportunity panels on the job page
+- [x] Backfill script `app/scripts/phase5_backfill.py`; see `docs/PHASE5.md`
 
-## Phase 6 — Browser Automation (guiarded)
+## Phase 6 — Application Preparation ✅
 
-- Playwright-based submission flow ONLY where platforms permit automation
-- Explicit human approval gate before any final submission
-- Rate-limit responsibility, no CAPTCHA/login/anti-bot bypass
-- Session persistence handled securely (`browser sessions` never committed)
+- [x] Application package per job: quality gate, deterministic answers, cover
+      letter drafts, per-job resume selection, answer editing
+- [x] Package lifecycle: prepare → validate → approve → archive/regenerate
+- [x] Applications UI + `/applications` and `/applications/{id}/preview` endpoints
+- [x] Migration `e60a8f4d2c71_phase6_application_preparation.py`
 
-## Phase 7 — Recruiters, Follow-ups & Logs
+## Phase 7 — Platform-Aware Application Execution ✅
+
+- [x] Execution engine: detect platform → resolve policy → run safe steps only →
+      stop at the human approval boundary
+- [x] Per-platform policy defaults (boards = `HUMAN_ASSISTED`; career sites /
+      generic = `PERMITTED_BROWSER`), user-overridable via Preferences
+- [x] Mock + Playwright browser drivers, deterministic field mapping (never guesses
+      sensitive/unknown fields), no CAPTCHA/login/anti-bot bypass
+- [x] Ordered step trail, evidence, confirmation reference/URL, daily budget,
+      duplicate protection
+- [x] Execution UI at `/applications/:id/execute`
+- [x] Migration `f7a3b9c2d1e5_phase7_application_execution.py`; see `docs/PHASE7.md`
+
+## Phase 8 — n8n Workflow Automation (PLANNED)
+
+- Orchestrate repeated discovery / preparation / follow-up flows in n8n, still
+  calling the same approved, human-gated engine. **Not implemented yet.** No Phase 7
+  behavior changes.
+
+## Phase 9 — Recruiters, Follow-ups & Analytics
 
 - Recruiter contacts and follow-up scheduling
 - Automation run/error log UI consumed from `automation_runs` / `automation_errors`
 - Reporting & analytics on the dashboard
 
+## Phase 10 — Multi-Provider & Production Hardening
+
+- Concrete AI provider + expandable Apify/generic job sources
+- Auth, deployment, real-driver coverage for platforms where automation is
+  explicitly permitted
+
 ## Safety constraints (all phases)
 
-- No mass-apply / auto-submit without human approval.
+- No mass-apply / auto-submit without human approval — approval gates remain in
+  every phase; `apply_everywhere()` is deliberately excluded.
 - No bypassing CAPTCHA, logins, anti-bot systems, or rate limits.
 - Credentials, cookies, and browser sessions never committed to the repo.
