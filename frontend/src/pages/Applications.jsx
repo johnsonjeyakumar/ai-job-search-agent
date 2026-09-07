@@ -39,10 +39,18 @@ export default function Applications() {
 
   return (
     <div>
-      <PageHeader
-        title="Applications"
-        description="Prepared application packages and their execution status."
-      />
+      <div className="mb-4 flex items-start justify-between">
+        <PageHeader
+          title="Application Packages"
+          description="Prepared application packages and their execution status."
+        />
+        <Link
+          to="/applications"
+          className="shrink-0 rounded border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+        >
+          ← Track applications
+        </Link>
+      </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

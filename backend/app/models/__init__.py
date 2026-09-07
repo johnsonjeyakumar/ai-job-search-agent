@@ -15,6 +15,12 @@ from app.models.application_package import (
     ApplicationTailoringSuggestion,
     ApplicationValidationFinding,
 )
+from app.models.application_tracking import (
+    ApplicationEvent,
+    ApplicationResponse,
+    InterviewRecord,
+    OfferRecord,
+)
 from app.models.automation import AutomationError, AutomationRun
 from app.models.company import Company
 from app.models.event import JobEvent
@@ -46,6 +52,10 @@ __all__ = [
     "ApplicationExecution",
     "ApplicationExecutionStep",
     "ApplicationExecutionEvidence",
+    "ApplicationEvent",
+    "ApplicationResponse",
+    "InterviewRecord",
+    "OfferRecord",
     "AutomationRun",
     "AutomationError",
 ]

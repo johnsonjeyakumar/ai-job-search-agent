@@ -76,6 +76,132 @@ function RecommendationBars({ counts }) {
   );
 }
 
+const RATE_LABELS = {
+  shortlist_rate: "Shortlisted",
+  application_rate: "Applied",
+  submission_confirmed_rate: "Confirmed",
+  response_rate: "Responses",
+  interview_rate: "Interviews",
+  offer_rate: "Offers",
+  rejection_rate: "Rejections",
+  withdrawal_rate: "Withdrawn",
+};
+
+function FunnelSection({ funnel }) {
+  if (!funnel) return null;
+  const max = Math.max(1, ...(funnel.steps || []).map((s) => s.count));
+  const rates = funnel.rates || {};
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Application Funnel</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Tracked progress across the lifecycle · range: {funnel.range}.
+          </p>
+        </div>
+        <Link to="/applications" className="text-xs font-medium text-slate-600 hover:underline">
+          Track applications →
+        </Link>
+      </div>
+      <div className="mt-4 space-y-2">
+        {(funnel.steps || []).map((s) => (
+          <div key={s.step} className="flex items-center gap-3">
+            <span className="w-40 shrink-0 text-xs text-slate-600">{s.label}</span>
+            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full bg-slate-900"
+                style={{ width: `${(s.count / max) * 100}%` }}
+              />
+            </div>
+            <span className="w-8 shrink-0 text-right text-xs font-medium text-slate-700">{s.count}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {Object.entries(RATE_LABELS).map(([key, label]) => {
+          const value = rates[key];
+          return (
+            <div key={key} className="rounded-md bg-slate-50 p-2">
+              <p className="text-xs text-slate-500">{label}</p>
+              <p className="mt-0.5 text-lg font-semibold text-slate-900">
+                {value == null ? "—" : `${value}%`}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FollowUpSection({ followUps }) {
+  if (!followUps) return null;
+  const items = followUps.items || [];
+  const count = (state) =>
+    items.filter((f) => f.state === state).length;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Follow-ups</h3>
+          <p className="mt-1 text-xs text-slate-500">Scheduled follow-ups across all applications.</p>
+        </div>
+        <Link to="/applications?follow_up=PENDING" className="text-xs font-medium text-slate-600 hover:underline">
+          View all →
+        </Link>
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        <div className="rounded-md bg-rose-50 p-2">
+          <p className="text-xs text-rose-500">Due / overdue</p>
+          <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.due_today + followUps.overdue}</p>
+        </div>
+        <div className="rounded-md bg-amber-50 p-2">
+          <p className="text-xs text-amber-600">This week</p>
+          <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.due_this_week}</p>
+        </div>
+        <div className="rounded-md bg-slate-50 p-2">
+          <p className="text-xs text-slate-500">Upcoming</p>
+          <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.upcoming}</p>
+        </div>
+      </div>
+      {items.length > 0 ? (
+        <ul className="mt-4 space-y-2">
+          {items
+            .filter((f) => f.state === "DUE" || f.state === "PENDING")
+            .slice(0, 6)
+            .map((f) => (
+              <li key={f.id} className="flex items-center justify-between gap-2 text-sm">
+                <div className="min-w-0">
+                  <Link
+                    to={`/applications/track/${f.application_id}`}
+                    className="truncate font-medium text-slate-800 hover:underline"
+                  >
+                    {f.job_title || "Untitled role"}
+                  </Link>
+                  <p className="truncate text-xs text-slate-500">
+                    {f.company || ""} · {f.scheduled_date || "no date"}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    f.state === "DUE"
+                      ? "bg-rose-100 text-rose-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {f.state}
+                </span>
+              </li>
+            ))}
+        </ul>
+      ) : (
+        <p className="mt-4 text-sm text-slate-500">No follow-ups scheduled.</p>
+      )}
+    </div>
+  );
+}
+
 function SetupCheck({ label, done }) {
   return (
     <div className="flex items-center gap-2 text-sm">
@@ -94,10 +220,18 @@ function SetupCheck({ label, done }) {
 export default function Dashboard() {
   const { profile, preferences, resumes, health, loading } = useAppData();
   const [stats, setStats] = useState(null);
+  const [funnel, setFunnel] = useState(null);
+  const [followUps, setFollowUps] = useState(null);
 
   useEffect(() => {
     apiGet("/jobs/stats")
       .then(setStats)
+      .catch(() => {});
+    apiGet("/analytics/funnel?range=all")
+      .then(setFunnel)
+      .catch(() => {});
+    apiGet("/tracking/follow-ups")
+      .then(setFollowUps)
       .catch(() => {});
   }, []);
 
@@ -195,6 +329,11 @@ export default function Dashboard() {
             <FreshnessBars counts={stats?.freshness_counts} />
           </div>
         </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <FunnelSection funnel={funnel} />
+        <FollowUpSection followUps={followUps} />
       </div>
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

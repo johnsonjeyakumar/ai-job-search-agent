@@ -53,7 +53,9 @@ def isolated_test_db():
 def db_engine():
     settings = get_settings()
     test_url = _url_for_db(make_url(settings.database_url), TEST_DB_NAME)
-    return create_engine(test_url, pool_pre_ping=True)
+    engine = create_engine(test_url, pool_pre_ping=True)
+    yield engine
+    engine.dispose()
 
 
 @pytest.fixture

@@ -37,6 +37,10 @@ class Preferences(Base):
     # {"linkedin": "HUMAN_ASSISTED", "indeed": "PERMITTED_BROWSER", ...}
     platform_policies: Mapped[dict] = mapped_column(JSONB, default=dict)
 
+    # Phase 8 follow-up scheduling (central config, applied when an
+    # application is first submitted).
+    follow_up_interval_days: Mapped[int] = mapped_column(Integer, default=7)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

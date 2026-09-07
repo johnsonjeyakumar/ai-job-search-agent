@@ -796,7 +796,10 @@ def _upsert_application_tracker(
 
     from sqlalchemy import select
 
+    from app.application_tracking.events import record_application_event
     from app.models.application import Application
+    from app.models.resume import Resume
+    from app.services import application_lifecycle_service
 
     row = db.scalar(
         select(Application)
@@ -804,27 +807,84 @@ def _upsert_application_tracker(
         .order_by(Application.id.desc())
         .limit(1)
     )
-    app_status = "submitted" if confirmed else "applied"
+    legacy = "submitted" if confirmed else "applied"
+    target_status = (
+        "SUBMISSION_CONFIRMED" if confirmed else "SUBMITTED"
+    )
     note = (
         "Submission confirmed by execution."
         if confirmed
         else "Submission occurred; confirmation pending."
     )
+
+    # Snapshot the resume identity so historical apps survive later
+    # deactivation/archival of the resume row.
+    resume = (
+        db.get(Resume, package.selected_resume_id)
+        if package.selected_resume_id is not None
+        else None
+    )
+
     if row is None:
-        db.add(Application(
+        row = Application(
             job_id=package.job_id,
             profile_id=package.profile_id,
             resume_id=package.selected_resume_id,
-            status=app_status,
+            resume_name=resume.name if resume is not None else None,
+            resume_version=resume.version if resume is not None else None,
+            status=legacy,
+            lifecycle_status="DISCOVERED",
             applied_date=date.today(),
             application_url=execution.confirmation_url,
             notes=f"Execution #{execution.id}: {note}",
-        ))
+        )
+        db.add(row)
+        db.flush()
+        record_application_event(
+            db,
+            row.id,
+            "APPLICATION_CREATED",
+            source="EXECUTION",
+            previous_status=None,
+            new_status="DISCOVERED",
+            notes=note,
+            metadata={"job_id": package.job_id, "execution_id": execution.id},
+        )
     else:
-        row.status = app_status
+        row.status = legacy
         row.applied_date = date.today()
         row.application_url = execution.confirmation_url or row.application_url
         row.notes = f"Execution #{execution.id}: {note}"
+        if row.resume_name is None and resume is not None:
+            row.resume_id = package.selected_resume_id
+            row.resume_name = resume.name
+            row.resume_version = resume.version
+
+    # Move through the controlled state machine (legal edge only); record a
+    # transparent history marker if the row is already beyond SUBMITTED (e.g.
+    # a repeat submission after a response) instead of silently corrupting it.
+    try:
+        application_lifecycle_service.move_lifecycle(
+            db,
+            row,
+            target_status,
+            source="EXECUTION",
+            notes=note,
+            metadata={"execution_id": execution.id, "confirmed": confirmed},
+        )
+    except application_lifecycle_service.TrackingError:
+        record_application_event(
+            db,
+            row.id,
+            target_status,
+            source="EXECUTION",
+            previous_status=row.lifecycle_status,
+            new_status=row.lifecycle_status,
+            notes=f"Repeat submission for execution #{execution.id}: {note}",
+            metadata={"execution_id": execution.id, "confirmed": confirmed},
+        )
+    # Reference mirror of the state machine helpers for clarity (no-op).
+    db.flush()
 
 
 def _record_automation_error(db, package, stage: str, message: str) -> None:

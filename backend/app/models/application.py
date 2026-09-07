@@ -21,9 +21,19 @@ class Application(Base):
     resume_id: Mapped[int | None] = mapped_column(
         ForeignKey("resumes.id", ondelete="SET NULL"), index=True
     )
-    # discovered | saved | applied | interviewing | offered | rejected | withdrawn
+    # Legacy short status: discovered | saved | preparing | applied | ...
+    # Kept for backward compatibility with Phase 6/7 code paths.
     status: Mapped[str] = mapped_column(String(50), default="discovered")
-    applied_date: Mapped[date | None] = mapped_column(Date)
+    # Phase 8 controlled lifecycle (see app/models/application_tracking.py).
+    # The single source of truth for the tracking funnel; `status` mirrors it.
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(40), default="DISCOVERED", index=True
+    )
+    # Historical resume snapshot: keeps the identity/version of the resume used
+    # even if the resume row is later deactivated/archived/deleted.
+    resume_name: Mapped[str | None] = mapped_column(String(255))
+    resume_version: Mapped[str | None] = mapped_column(String(50))
+    applied_date: Mapped[date | None] = mapped_column(Date, index=True)
     interview_date: Mapped[date | None] = mapped_column(Date)
     application_url: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -78,9 +88,13 @@ class FollowUp(Base):
     )
     action_type: Mapped[str] = mapped_column(String(100))
     scheduled_date: Mapped[date | None] = mapped_column(Date)
+    reminder_date: Mapped[date | None] = mapped_column(Date)
     completed_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(50), default="pending")
+    # PENDING | COMPLETED | CANCELLED  (DUE is derived at read time:
+    # scheduled_date <= today while not COMPLETED/CANCELLED).
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
