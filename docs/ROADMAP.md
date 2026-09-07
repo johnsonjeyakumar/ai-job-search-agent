@@ -78,11 +78,27 @@ the next begins. No phase auto-starts.
   calling the same approved, human-gated engine. **Not implemented yet.** No Phase 7
   behavior changes.
 
-## Phase 9 — Recruiters, Follow-ups & Analytics
+## Phase 9 — Follow-Up Automation Engine + Resume & Job-Source Analytics ✅
 
-- Recruiter contacts and follow-up scheduling
-- Automation run/error log UI consumed from `automation_runs` / `automation_errors`
-- Reporting & analytics on the dashboard
+- [x] Follow-up engine on top of application tracking: reasons
+      (`SUBMISSION_FOLLOW_UP`, `INTERVIEW_THANK_YOU`), priorities
+      (`HIGH`/`MEDIUM`/`LOW`), `trigger_key` dedupe, derived lifecycle states
+      (`SCHEDULED`/`DUE`/`OVERDUE`/`RESCHEDULED`/`SKIPPED`/…); skip / restore /
+      cancel / complete / reschedule actions with immutable timeline events
+- [x] Interview thank-you scheduling wired into `record_interview`
+      (`interview_follow_up_days` preference)
+- [x] `application_source` captured from the real recorded execution platform
+      (never fabricated)
+- [x] Analytics: source quality (discovery + submission, explicit deterministic
+      score + bands), resume performance + recommended resume, response-time
+      breakdowns, deterministic evidence-only insights
+- [x] Follow-up filtered list + health endpoints on `/tracking` + `/analytics`
+- [x] Dashboard follow-up card (OVERDUE / DUE / UPCOMING + actions), tracking
+      detail follow-up UX, new `/analytics` page
+- [x] Migration `b3e7d2f1a9c4`; 23 new tests; full suite 344✅; see
+      `docs/PHASE9.md`
+- [ ] Recruiter contact automation deliberately out of scope (no email/messaging
+      automation) — recruiters remain a manual, tracked list
 
 ## Phase 10 — Multi-Provider & Production Hardening
 

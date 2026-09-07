@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { apiGet } from "../api/client.js";
+import { apiGet, apiSend } from "../api/client.js";
 import { useAppData } from "../context/AppDataContext.jsx";
 import PageHeader from "../components/PageHeader.jsx";
 import StatCard from "../components/StatCard.jsx";
@@ -135,17 +135,127 @@ function FunnelSection({ funnel }) {
   );
 }
 
-function FollowUpSection({ followUps }) {
+const FOLLOW_UP_STYLE = {
+  DUE: "bg-rose-50 text-rose-700 ring-rose-200",
+  OVERDUE: "bg-rose-100 text-rose-800 ring-rose-300",
+  SCHEDULED: "bg-sky-50 text-sky-700 ring-sky-200",
+  RESCHEDULED: "bg-violet-50 text-violet-700 ring-violet-200",
+  COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  CANCELLED: "bg-slate-100 text-slate-500 ring-slate-200",
+  SKIPPED: "bg-slate-100 text-slate-500 ring-slate-200",
+};
+
+const PRIORITY_STYLE = {
+  HIGH: "bg-rose-100 text-rose-700",
+  MEDIUM: "bg-amber-100 text-amber-700",
+  LOW: "bg-slate-100 text-slate-600",
+};
+
+function followUpActions(followUp, onAction) {
+  if (followUp.lifecycle_state === "COMPLETED") return [];
+  if (followUp.lifecycle_state === "CANCELLED" || followUp.lifecycle_state === "SKIPPED") {
+    return [{ key: "restore", label: "Restore", onClick: () => onAction("restore") }];
+  }
+  return [
+    { key: "complete", label: "Complete", onClick: () => onAction("complete") },
+    { key: "reschedule", label: "Reschedule", onClick: () => onAction("reschedule") },
+    { key: "skip", label: "Skip", onClick: () => onAction("skip") },
+  ];
+}
+
+function FollowUpItem({ followUp, onAction }) {
+  const reasonLabel = (followUp.reason || "SUBMISSION_FOLLOW_UP").toLowerCase().replaceAll("_", " ");
+  return (
+    <li className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          to={`/applications/track/${followUp.application_id}`}
+          className="min-w-0 truncate font-medium text-slate-800 hover:underline"
+        >
+          {followUp.job_title || "Untitled role"}
+        </Link>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${
+              FOLLOW_UP_STYLE[followUp.lifecycle_state] || FOLLOW_UP_STYLE.SCHEDULED
+            }`}
+          >
+            {followUp.lifecycle_state}
+          </span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+              PRIORITY_STYLE[followUp.priority] || PRIORITY_STYLE.MEDIUM
+            }`}
+          >
+            {followUp.priority}
+          </span>
+        </div>
+      </div>
+      <p className="truncate text-xs text-slate-500">
+        {[followUp.company, reasonLabel, followUp.scheduled_date]
+          .filter(Boolean)
+          .join(" · ")}
+        {followUp.days_late ? ` · ${followUp.days_late}d late` : ""}
+        {followUp.resume_version ? ` · ${followUp.resume_version}` : ""}
+      </p>
+      <div className="flex items-center gap-2 pt-0.5">
+        {followUpActions(followUp, (action) => onAction(followUp, action)).map((action) => (
+          <button
+            key={action.key}
+            type="button"
+            onClick={action.onClick}
+            className="rounded border border-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+    </li>
+  );
+}
+
+function FollowUpSection({ followUps, refreshFollowUps }) {
   if (!followUps) return null;
   const items = followUps.items || [];
-  const count = (state) =>
-    items.filter((f) => f.state === state).length;
+
+  const groups = [
+    { key: "OVERDUE", label: "Overdue", items: items.filter((f) => f.lifecycle_state === "OVERDUE") },
+    { key: "DUE", label: "Due today", items: items.filter((f) => f.lifecycle_state === "DUE") },
+    {
+      key: "UPCOMING",
+      label: "Upcoming",
+      items: items.filter(
+        (f) => f.lifecycle_state === "SCHEDULED" || f.lifecycle_state === "RESCHEDULED"
+      ),
+    },
+  ];
+  const shown = groups.filter((g) => g.items.length > 0);
+  const totalActive = shown.reduce((sum, g) => sum + g.items.length, 0);
+
+  async function handleAction(followUp, action) {
+    try {
+      if (action === "complete") await apiSend("POST", `/tracking/follow-ups/${followUp.id}/complete`, {});
+      if (action === "skip") await apiSend("POST", `/tracking/follow-ups/${followUp.id}/skip`, {});
+      if (action === "restore") await apiSend("POST", `/tracking/follow-ups/${followUp.id}/restore`, {});
+      if (action === "reschedule") {
+        const next = window.prompt("New date (YYYY-MM-DD):", followUp.scheduled_date || "");
+        if (!next) return;
+        await apiSend("POST", `/tracking/follow-ups/${followUp.id}/reschedule`, { scheduled_date: next });
+      }
+      refreshFollowUps();
+    } catch (error) {
+      window.alert(String(error.message || error));
+    }
+  }
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Follow-ups</h3>
-          <p className="mt-1 text-xs text-slate-500">Scheduled follow-ups across all applications.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Priority, reason and due states across all applications.
+          </p>
         </div>
         <Link to="/applications?follow_up=PENDING" className="text-xs font-medium text-slate-600 hover:underline">
           View all →
@@ -153,50 +263,39 @@ function FollowUpSection({ followUps }) {
       </div>
       <div className="mt-4 grid grid-cols-3 gap-3">
         <div className="rounded-md bg-rose-50 p-2">
-          <p className="text-xs text-rose-500">Due / overdue</p>
-          <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.due_today + followUps.overdue}</p>
+          <p className="text-xs text-rose-500">Due today</p>
+          <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.due_today}</p>
         </div>
         <div className="rounded-md bg-amber-50 p-2">
-          <p className="text-xs text-amber-600">This week</p>
-          <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.due_this_week}</p>
+          <p className="text-xs text-amber-600">Overdue</p>
+          <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.overdue}</p>
         </div>
         <div className="rounded-md bg-slate-50 p-2">
           <p className="text-xs text-slate-500">Upcoming</p>
           <p className="mt-0.5 text-lg font-semibold text-slate-900">{followUps.upcoming}</p>
         </div>
       </div>
-      {items.length > 0 ? (
-        <ul className="mt-4 space-y-2">
-          {items
-            .filter((f) => f.state === "DUE" || f.state === "PENDING")
-            .slice(0, 6)
-            .map((f) => (
-              <li key={f.id} className="flex items-center justify-between gap-2 text-sm">
-                <div className="min-w-0">
-                  <Link
-                    to={`/applications/track/${f.application_id}`}
-                    className="truncate font-medium text-slate-800 hover:underline"
-                  >
-                    {f.job_title || "Untitled role"}
-                  </Link>
-                  <p className="truncate text-xs text-slate-500">
-                    {f.company || ""} · {f.scheduled_date || "no date"}
-                  </p>
-                </div>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    f.state === "DUE"
-                      ? "bg-rose-100 text-rose-700"
-                      : "bg-amber-100 text-amber-700"
-                  }`}
-                >
-                  {f.state}
-                </span>
-              </li>
-            ))}
-        </ul>
+      {totalActive > 0 ? (
+        <div className="mt-4 space-y-4">
+          {shown.map((group) => (
+            <div key={group.key}>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+                {group.label} ({group.items.length})
+              </p>
+              <ul className="space-y-3">
+                {group.items.slice(0, 6).map((followUp) => (
+                  <FollowUpItem
+                    key={followUp.id}
+                    followUp={followUp}
+                    onAction={handleAction}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       ) : (
-        <p className="mt-4 text-sm text-slate-500">No follow-ups scheduled.</p>
+        <p className="mt-4 text-sm text-slate-500">No active follow-ups scheduled.</p>
       )}
     </div>
   );
@@ -230,10 +329,15 @@ export default function Dashboard() {
     apiGet("/analytics/funnel?range=all")
       .then(setFunnel)
       .catch(() => {});
+  }, []);
+
+  const refreshFollowUps = () => {
     apiGet("/tracking/follow-ups")
       .then(setFollowUps)
       .catch(() => {});
-  }, []);
+  };
+
+  useEffect(refreshFollowUps, []);
 
   const profileDone = !!profile?.name && !!profile?.email;
   const resumeCount = resumes?.length || 0;
@@ -333,7 +437,7 @@ export default function Dashboard() {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <FunnelSection funnel={funnel} />
-        <FollowUpSection followUps={followUps} />
+        <FollowUpSection followUps={followUps} refreshFollowUps={refreshFollowUps} />
       </div>
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

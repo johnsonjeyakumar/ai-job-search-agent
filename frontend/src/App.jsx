@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 import { AppDataProvider } from "./context/AppDataContext.jsx";
 import Layout from "./components/Layout.jsx";
+import Analytics from "./pages/Analytics.jsx";
 import Applications from "./pages/Applications.jsx";
 import ApplicationTracker from "./pages/ApplicationTracker.jsx";
 import ApplicationTracking from "./pages/ApplicationTracking.jsx";
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/applications/packages" element={<Applications />} />
           <Route path="/applications/track/:id" element={<ApplicationTracking />} />
           <Route path="/applications/:id/execute" element={<ExecutionPage />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/resumes" element={<Resumes />} />
           <Route path="/recruiters" element={<Recruiters />} />
           <Route path="/profile" element={<Profile />} />

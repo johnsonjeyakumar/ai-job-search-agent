@@ -96,6 +96,8 @@ APPLICATION_EVENTS = (
     "FOLLOW_UP_COMPLETED",
     "FOLLOW_UP_RESCHEDULED",
     "FOLLOW_UP_CANCELLED",
+    "FOLLOW_UP_SKIPPED",
+    "FOLLOW_UP_RESTORED",
     "STATUS_CORRECTED",
     "NOTE_ADDED",
 )
@@ -125,9 +127,38 @@ INTERVIEW_TYPES = (
 
 OFFER_STATUSES = ("RECEIVED", "ACCEPTED", "DECLINED", "EXPIRED")
 
-FOLLOW_UP_STATUSES = ("PENDING", "COMPLETED", "CANCELLED")
+FOLLOW_UP_STATUSES = ("PENDING", "COMPLETED", "CANCELLED", "SKIPPED")
 # ``DUE`` is derived at read time from scheduled_date vs today when the
-# follow-up is neither COMPLETED nor CANCELLED.
+# follow-up is neither COMPLETED nor CANCELLED/SKIPPED.
+
+# Deterministic follow-up priority (never LLM-provided).
+FOLLOW_UP_PRIORITIES = ("HIGH", "MEDIUM", "LOW")
+
+# Deterministic follow-up reasons (controlled vocabulary, set by the rules
+# engine at schedule time — never a free-text AI phrase).
+FOLLOW_UP_REASONS = (
+    "SUBMISSION_FOLLOW_UP",
+    "INTERVIEW_THANK_YOU",
+)
+
+# Full follow-up lifecycle vocabulary (Phase 9). ``RESCHEDULED``/``OVERDUE``
+# are derived at read time from the immutable event history + scheduled_date:
+#   SCHEDULED     active, scheduled_date in the future, never rescheduled
+#   DUE           active, scheduled_date == today
+#   OVERDUE       active, scheduled_date < today
+#   RESCHEDULED   active (future), a FOLLOW_UP_RESCHEDULED event exists
+#   COMPLETED     stored status COMPLETED
+#   CANCELLED     stored status CANCELLED
+#   SKIPPED       stored status SKIPPED
+FOLLOW_UP_DERIVED_STATES = (
+    "SCHEDULED",
+    "DUE",
+    "OVERDUE",
+    "RESCHEDULED",
+    "COMPLETED",
+    "CANCELLED",
+    "SKIPPED",
+)
 
 SMALL_SAMPLE_THRESHOLD = 5
 

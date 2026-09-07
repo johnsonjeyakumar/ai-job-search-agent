@@ -104,11 +104,79 @@ def sources(db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/resumes")
-def resumes(db: Session = Depends(get_db)) -> dict:
+def resumes(
+    role: str | None = Query(default=None),
+    location: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    company: str | None = Query(default=None),
+    from_date: str | None = Query(default=None),
+    to_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
     return {
-        "items": analytics.by_resume(db),
+        "items": analytics.resume_performance(
+            db,
+            role=role,
+            location=location,
+            source=source,
+            company=company,
+            from_date=from_date,
+            to_date=to_date,
+        ),
         "small_sample_threshold": analytics.SMALL_SAMPLE_THRESHOLD,
+        "rank_labels": list(analytics.RESUME_RANK_LABELS),
     }
+
+
+@router.get("/resumes/compare")
+def resumes_compare(
+    left: str = Query(...),
+    right: str = Query(...),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Compare two resume labels. Each label is matched against the historical
+    resume name/version; unmatched resumes simply drop out of the comparison."""
+    rows = analytics.resume_performance(db)
+    left_matches = [r for r in rows if r["label"] == left]
+    right_matches = [r for r in rows if r["label"] == right]
+    return {
+        "left": {"label": left, "row": left_matches[0] if left_matches else None},
+        "right": {"label": right, "row": right_matches[0] if right_matches else None},
+        "basis": (
+            "Rows are historical snapshots per resume; rates are verified over "
+            "submissions. Labels must match the resume name + version string."
+        ),
+    }
+
+
+@router.get("/recommended-resume")
+def recommended_resume(
+    role: str | None = Query(default=None),
+    location: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    return analytics.recommended_resume(db, role=role, location=location, source=source)
+
+
+@router.get("/sources/performance")
+def source_performance(db: Session = Depends(get_db)) -> dict:
+    return analytics.source_performance(db)
+
+
+@router.get("/response-times/breakdowns")
+def response_time_breakdowns(db: Session = Depends(get_db)) -> dict:
+    return analytics.response_time_breakdowns(db)
+
+
+@router.get("/insights")
+def insights(db: Session = Depends(get_db)) -> dict:
+    return analytics.insights(db)
+
+
+@router.get("/follow-ups")
+def follow_ups(db: Session = Depends(get_db)) -> dict:
+    return analytics.follow_up_summary(db)
 
 
 @router.get("/trends")
@@ -128,11 +196,6 @@ def trends(
 @router.get("/response-times")
 def response_times(db: Session = Depends(get_db)) -> dict:
     return analytics.response_times(db)
-
-
-@router.get("/follow-ups")
-def follow_ups(db: Session = Depends(get_db)) -> dict:
-    return analytics.follow_up_summary(db)
 
 
 __all__ = ["router"]

@@ -29,6 +29,12 @@ class Application(Base):
     lifecycle_status: Mapped[str] = mapped_column(
         String(40), default="DISCOVERED", index=True
     )
+    # Phase 9: where the application was actually submitted (e.g. linkedin,
+    # indeed, company_career). Distinct from job.source (discovery source).
+    # NULL until a real submission platform is known — never fabricated.
+    application_source: Mapped[str | None] = mapped_column(
+        String(100), index=True
+    )
     # Historical resume snapshot: keeps the identity/version of the resume used
     # even if the resume row is later deactivated/archived/deleted.
     resume_name: Mapped[str | None] = mapped_column(String(255))
@@ -87,13 +93,25 @@ class FollowUp(Base):
         ForeignKey("recruiter_contacts.id", ondelete="SET NULL"), index=True
     )
     action_type: Mapped[str] = mapped_column(String(100))
+    # PENDING | COMPLETED | CANCELLED | SKIPPED (SCHEDULED/DUE/OVERDUE/
+    # RESCHEDULED are derived at read time from the event history + dates).
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    # Phase 9 follow-up engineering: deterministic priority / reason / trigger.
+    # priority: HIGH | MEDIUM | LOW
+    priority: Mapped[str | None] = mapped_column(String(10))
+    # reason: SUBMISSION_FOLLOW_UP | INTERVIEW_THANK_YOU
+    reason: Mapped[str | None] = mapped_column(String(50))
+    # The lifecycle status that caused this follow-up to be scheduled.
+    trigger_status: Mapped[str | None] = mapped_column(String(40))
+    # Dedupe key, e.g. "app:12:SUBMISSION_FOLLOW_UP" or
+    # "app:12:INTERVIEW_THANK_YOU:5". One follow-up per trigger, no matter how
+    # often the trigger endpoint is hit.
+    trigger_key: Mapped[str | None] = mapped_column(String(100), index=True)
     scheduled_date: Mapped[date | None] = mapped_column(Date)
     reminder_date: Mapped[date | None] = mapped_column(Date)
     completed_date: Mapped[date | None] = mapped_column(Date)
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text)
-    # PENDING | COMPLETED | CANCELLED  (DUE is derived at read time:
-    # scheduled_date <= today while not COMPLETED/CANCELLED).
-    status: Mapped[str] = mapped_column(String(30), default="pending")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(

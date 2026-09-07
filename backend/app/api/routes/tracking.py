@@ -11,7 +11,9 @@ from app.models.application_tracking import (
 from app.schemas.application_tracking import (
     FollowUpCompleteRequest,
     FollowUpRescheduleRequest,
+    FollowUpRestoreRequest,
     FollowUpScheduleRequest,
+    FollowUpSkipRequest,
     InterviewCreateRequest,
     NoteAddRequest,
     OfferCreateRequest,
@@ -298,8 +300,87 @@ def schedule_follow_up(
 
 
 @router.get("/follow-ups")
-def list_follow_ups(db: Session = Depends(get_db)) -> dict:
+def list_follow_ups(
+    status: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    due: bool = Query(default=False),
+    overdue: bool = Query(default=False),
+    application_id: int | None = Query(default=None),
+    company: str | None = Query(default=None),
+    from_date: str | None = Query(default=None),
+    to_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        return analytics.follow_ups_list(
+            db,
+            status=status,
+            priority=priority,
+            due=due,
+            overdue=overdue,
+            application_id=application_id,
+            company=company,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    except ValueError as exc:
+        raise _handle(exc) from exc
+
+
+@router.get("/follow-ups/summary")
+def follow_ups_summary(db: Session = Depends(get_db)) -> dict:
     return analytics.follow_up_summary(db)
+
+
+@router.get("/follow-ups/{follow_up_id}")
+def get_follow_up(follow_up_id: int, db: Session = Depends(get_db)) -> dict:
+    _follow_up_or_404(db, follow_up_id)
+    items = analytics.follow_up_summary(db)["items"]
+    row = next((f for f in items if f["id"] == follow_up_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Follow-up {follow_up_id} not found")
+    return row
+
+
+@router.post("/follow-ups/{follow_up_id}/skip")
+def skip_follow_up(
+    follow_up_id: int,
+    payload: FollowUpSkipRequest | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    follow_up = _follow_up_or_404(db, follow_up_id)
+    try:
+        lifecycle.skip_follow_up(
+            db, follow_up, notes=payload.notes if payload else None
+        )
+        db.commit()
+    except Exception as exc:
+        raise _handle(exc) from exc
+    return {"message": "Follow-up skipped.", "follow_up_id": follow_up.id}
+
+
+@router.post("/follow-ups/{follow_up_id}/restore")
+def restore_follow_up(
+    follow_up_id: int,
+    payload: FollowUpRestoreRequest | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    follow_up = _follow_up_or_404(db, follow_up_id)
+    try:
+        lifecycle.restore_follow_up(
+            db, follow_up, notes=payload.notes if payload else None
+        )
+        db.commit()
+    except Exception as exc:
+        raise _handle(exc) from exc
+    return {"message": "Follow-up restored.", "follow_up_id": follow_up.id}
+
+
+def _follow_up_or_404(db: Session, follow_up_id: int):
+    follow_up = db.get(lifecycle.FollowUp, follow_up_id)
+    if follow_up is None:
+        raise HTTPException(status_code=404, detail=f"Follow-up {follow_up_id} not found")
+    return follow_up
 
 
 @router.post("/follow-ups/{follow_up_id}/complete")
@@ -345,13 +426,6 @@ def cancel_follow_up(
     )
     db.commit()
     return {"message": "Follow-up cancelled.", "follow_up_id": follow_up.id}
-
-
-def _follow_up_or_404(db: Session, follow_up_id: int):
-    follow_up = db.get(lifecycle.FollowUp, follow_up_id)
-    if follow_up is None:
-        raise HTTPException(status_code=404, detail=f"Follow-up {follow_up_id} not found")
-    return follow_up
 
 
 @router.get("/statuses")

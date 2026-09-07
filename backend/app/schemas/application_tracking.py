@@ -45,3 +45,11 @@ class FollowUpCompleteRequest(BaseModel):
 class FollowUpRescheduleRequest(BaseModel):
     scheduled_date: date
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class FollowUpSkipRequest(BaseModel):
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class FollowUpRestoreRequest(BaseModel):
+    notes: str | None = Field(default=None, max_length=2000)

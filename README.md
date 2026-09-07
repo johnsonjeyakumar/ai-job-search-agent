@@ -5,9 +5,9 @@ Apify, scores them with a transparent deterministic-first engine, prepares a
 tailored application package, and runs a **safe, human-gated application execution**
 workflow against the platform where the job lives.
 
-**Current status:** Phases 1–7 implemented and verified. Phase 8+ planned (see
-Roadmap). No automatic mass-application, and nothing is ever submitted without an
-explicit, per-package human approval.
+**Current status:** Phases 1–9 implemented and verified. No automatic
+mass-application, and nothing is ever submitted without an explicit, per-package
+human approval. Follow-ups and analytics are deterministic and evidence-only.
 
 ## Implemented phases
 
@@ -20,6 +20,8 @@ explicit, per-package human approval.
 | 5 | Personal Matching / Opportunity Scoring — deterministic matching (`job_matches`: skills, experience, role, location, education, remote, employment_type, salary, certifications), opportunity score, APPLY/REVIEW recommendations with evidence + blockers; strict AI output contract (the LLM can never emit scores) | ✅ |
 | 6 | Application Preparation — tailored per-job application packages (quality gate, deterministic answers, cover letter drafts, answer editing), validate / approve / archive lifecycle, resume selection | ✅ |
 | 7 | Platform-Aware Application Execution — detect platform → resolve per-platform policy → fill only known-safe fields → stop at the human approval boundary → record ordered step trail, evidence, and confirmation; mock + Playwright browser drivers; execution UI at `/applications/:id/execute` | ✅ |
+| 8 | Application Tracking — immutable lifecycle + timeline (`/tracking/applications`), follow-up scheduling state, funnel + performance analytics APIs and dashboard widgets | ✅ |
+| 9 | Follow-Up Engine + Analytics — typed priorities/reasons/trigger-keys, skip/restore/cancel/reschedule actions, interview thank-you scheduling; resume performance + recommended resume, source quality (discovery + submission), response-time breakdowns, deterministic insights; `/analytics` page | ✅ |
 
 ## Current capabilities
 
@@ -38,8 +40,17 @@ explicit, per-package human approval.
     stops at `AWAITING_USER` for a manually-completed, honestly-confirmed outcome,
   - records an ordered step trail, warnings, evidence, confirmation reference/URL,
     and enforces a configurable daily application budget.
+- Track every application across its lifecycle with an immutable timeline
+  (status moves, responses, interviews, offers, notes), and schedule typed
+  follow-ups (`SUBMISSION_FOLLOW_UP` / `INTERVIEW_THANK_YOU`) with priorities,
+  due-state badges (due/overdue/upcoming/skipped), and skip / restore /
+  reschedule / complete actions.
+- Full analytics page (`/analytics`): funnel, weekly trend, response times +
+  breakdowns, discovery/submission source quality (deterministic formula +
+  bands), resume performance with inferred rank, recommended resume with honest
+  no-data handling, follow-up health, and evidence-only insights.
 - Full dashboard: jobs, companies, recommendations, applications (+ execution),
-  resumes, recruiters, profile, preferences, settings, logs.
+  analytics, resumes, recruiters, profile, preferences, settings, logs.
 
 ## Safety / execution model
 
@@ -70,7 +81,8 @@ explicit, per-package human approval.
 backend/    FastAPI + SQLAlchemy + Alembic (Python)
   app/
     api/routes/            HTTP endpoints (health, profile, preferences, resumes,
-                           jobs, applications(+execution), companies)
+                           jobs, applications(+execution), tracking, analytics,
+                           companies)
     application_execution/ Phase 7 execution engine: detector, policy, fields,
                            browser drivers (mock + Playwright), executor, adapters
     services/              domain services (discovery, quality, matching,
@@ -91,8 +103,8 @@ storage/    locally stored resume files (gitignored)
 tests/      test strategy notes (unit tests live in backend/tests)
 ```
 
-See `docs/ARCHITECTURE.md`, `docs/PHASE5.md`, `docs/PHASE7.md`, and
-`docs/ROADMAP.md` for details.
+See `docs/ARCHITECTURE.md`, `docs/PHASE5.md`, `docs/PHASE7.md`, `docs/PHASE9.md`,
+and `docs/ROADMAP.md` for details.
 
 ## Local setup
 
@@ -156,7 +168,7 @@ cd ..\frontend
 npm run build
 ```
 
-Current gate: **277 backend tests pass**, `ruff check app tests` clean, frontend
+Current gate: **344 backend tests pass**, `ruff check app tests` clean, frontend
 `npm run build` passes.
 
 ### API docs
@@ -166,13 +178,16 @@ Current gate: **277 backend tests pass**, `ruff check app tests` clean, frontend
 
 ## Roadmap
 
-- **Phase 8 — n8n workflow automation (PLANNED, not implemented).** Orchestrate
-  repeated discovery / preparation / follow-up flows in n8n, still calling the
-  same approved, human-gated engine. No phase-7 behavior changes.
-- **Phase 9 — Recruiters, follow-ups & analytics.** Recruiter contacts, follow-up
-  scheduling, and the automation-run / error log UI together with dashboards.
-- **Phase 10 — Multi-provider & production hardening.** Concrete AI provider,
-  additional Apify/generic job sources, auth, deployment, and real-driver coverage
-  for platforms where automation is explicitly permitted.
+- **Phase 8 — Application tracking (✅).** Immutable application lifecycle +
+  timeline, follow-up scheduling state, funnel/performance analytics APIs and
+  dashboard widgets.
+- **Phase 9 — Follow-up engine & analytics (✅).** Typed follow-up automation
+  (priorities, reasons, trigger-keys, derived due states, skip/restore,
+  interview thank-yous), resume + source-quality analytics, recommended resume,
+  response-time breakdowns, deterministic insights, `/analytics` page. Recruiter
+  outreach automation is deliberately out of scope.
+- **Phase 10 — Multi-provider & production hardening (planned).** Concrete AI
+  provider, additional Apify/generic job sources, auth, deployment, and
+  real-driver coverage for platforms where automation is explicitly permitted.
 
 See `docs/ROADMAP.md` for the full phase plan.

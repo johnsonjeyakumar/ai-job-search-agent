@@ -25,10 +25,22 @@ const STATUS_BADGE = {
 
 const FOLLOW_UP_BADGE = {
   DUE: "bg-rose-100 text-rose-700",
+  OVERDUE: "bg-rose-100 text-rose-800",
+  SCHEDULED: "bg-sky-100 text-sky-700",
+  RESCHEDULED: "bg-violet-100 text-violet-700",
   PENDING: "bg-amber-100 text-amber-700",
   COMPLETED: "bg-emerald-100 text-emerald-700",
   CANCELLED: "bg-slate-100 text-slate-500",
+  SKIPPED: "bg-slate-100 text-slate-500",
 };
+
+const FOLLOW_UP_PRIORITY_BADGE = {
+  HIGH: "bg-rose-100 text-rose-700",
+  MEDIUM: "bg-amber-100 text-amber-700",
+  LOW: "bg-slate-100 text-slate-600",
+};
+
+const FOLLOW_UP_ACTIVE_STATES = ["SCHEDULED", "DUE", "OVERDUE", "RESCHEDULED"];
 
 const RESPONSE_CATEGORIES = [
   "NO_RESPONSE",
@@ -528,63 +540,118 @@ export default function ApplicationTracking() {
             </form>
             {followUps.length > 0 ? (
               <ul className="space-y-2">
-                {followUps.map((fu) => (
-                  <li key={fu.id} className="rounded-md border border-slate-200 p-3 text-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeFor(fu.state, FOLLOW_UP_BADGE)}`}>
-                        {fu.state}
-                      </span>
-                      <span className="text-slate-600">{fu.scheduled_date || "no date"}</span>
-                      {fu.status && <span className="text-xs text-slate-400">({fu.status})</span>}
-                    </div>
-                    {fu.notes && <p className="mt-1 text-slate-600">{fu.notes}</p>}
-                    {fu.state === "PENDING" || fu.state === "DUE" ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          onClick={() =>
-                            run(
-                              apiSend("POST", `/tracking/follow-ups/${fu.id}/complete`, null),
-                              "Follow-up completed."
-                            )
-                          }
-                          disabled={busy}
-                          className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                {followUps.map((fu) => {
+                  const state = fu.lifecycle_state || fu.state || fu.status || "PENDING";
+                  const active = FOLLOW_UP_ACTIVE_STATES.includes(state);
+                  return (
+                    <li key={fu.id} className="rounded-md border border-slate-200 p-3 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeFor(state, FOLLOW_UP_BADGE)}`}
                         >
-                          Complete
-                        </button>
-                        <button
-                          onClick={() => {
-                            const next = window.prompt("New scheduled date (YYYY-MM-DD):", fu.scheduled_date || today());
-                            if (!next) return;
-                            run(
-                              apiSend("POST", `/tracking/follow-ups/${fu.id}/reschedule`, {
-                                scheduled_date: next,
-                                notes: null,
-                              }),
-                              "Follow-up rescheduled."
-                            );
-                          }}
-                          disabled={busy}
-                          className="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white hover:bg-amber-400 disabled:opacity-50"
+                          {state.toLowerCase()}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            FOLLOW_UP_PRIORITY_BADGE[fu.priority] || FOLLOW_UP_PRIORITY_BADGE.MEDIUM
+                          }`}
                         >
-                          Reschedule
-                        </button>
-                        <button
-                          onClick={() =>
-                            run(
-                              apiSend("POST", `/tracking/follow-ups/${fu.id}/cancel`, null),
-                              "Follow-up cancelled."
-                            )
-                          }
-                          disabled={busy}
-                          className="rounded bg-rose-500 px-2 py-1 text-xs font-medium text-white hover:bg-rose-400 disabled:opacity-50"
-                        >
-                          Cancel
-                        </button>
+                          {fu.priority || "MEDIUM"}
+                        </span>
+                        <span className="text-slate-600">{fu.scheduled_date || "no date"}</span>
+                        {fu.days_late ? (
+                          <span className="text-xs text-rose-600">{fu.days_late}d late</span>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </li>
-                ))}
+                      <p className="mt-1 text-xs text-slate-500">
+                        {[
+                          (fu.reason || "SUBMISSION_FOLLOW_UP").toLowerCase().replaceAll("_", " "),
+                          fu.trigger_status
+                            ? `triggered at ${fu.trigger_status.toLowerCase().replaceAll("_", " ")}`
+                            : null,
+                          fu.resume_version ? `resume ${fu.resume_version}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      {fu.notes && <p className="mt-1 text-slate-600">{fu.notes}</p>}
+                      {active ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              run(
+                                apiSend("POST", `/tracking/follow-ups/${fu.id}/complete`, null),
+                                "Follow-up completed."
+                              )
+                            }
+                            disabled={busy}
+                            className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                          >
+                            Complete
+                          </button>
+                          <button
+                            onClick={() => {
+                              const next = window.prompt("New scheduled date (YYYY-MM-DD):", fu.scheduled_date || today());
+                              if (!next) return;
+                              run(
+                                apiSend("POST", `/tracking/follow-ups/${fu.id}/reschedule`, {
+                                  scheduled_date: next,
+                                  notes: null,
+                                }),
+                                "Follow-up rescheduled."
+                              );
+                            }}
+                            disabled={busy}
+                            className="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white hover:bg-amber-400 disabled:opacity-50"
+                          >
+                            Reschedule
+                          </button>
+                          <button
+                            onClick={() =>
+                              run(
+                                apiSend("POST", `/tracking/follow-ups/${fu.id}/skip`, null),
+                                "Follow-up skipped."
+                              )
+                            }
+                            disabled={busy}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Skip
+                          </button>
+                          <button
+                            onClick={() =>
+                              run(
+                                apiSend("POST", `/tracking/follow-ups/${fu.id}/cancel`, null),
+                                "Follow-up cancelled."
+                              )
+                            }
+                            disabled={busy}
+                            className="rounded bg-rose-500 px-2 py-1 text-xs font-medium text-white hover:bg-rose-400 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        state === "SKIPPED" || state === "CANCELLED" ? (
+                          <div className="mt-2">
+                            <button
+                              onClick={() =>
+                                run(
+                                  apiSend("POST", `/tracking/follow-ups/${fu.id}/restore`, null),
+                                  "Follow-up restored."
+                                )
+                              }
+                              disabled={busy}
+                              className="rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        ) : null
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-sm text-slate-500">No follow-ups scheduled.</p>

@@ -18,6 +18,10 @@ Personal, local-first job search & application agent.
 5. **Deterministic-first, no fabricated data** — scoring and answer generation are
    deterministic; AI output is contract-validated and never fabricates. Migration
    history is additive; nothing drops or resets existing data.
+6. **Evidence-backed tracking & analytics** — application lifecycle, follow-up
+   state, and every rate/quality/rank metric are derived from immutable history
+   (or honest `Limited data`/`Insufficient data` labels), never from guesses; the
+   follow-up engine and analytics are plain deterministic Python, with no LLM.
 
 ## Layers
 
@@ -52,6 +56,12 @@ JobSource (Apify) ──► normalize ──► jobs (DB)
         execution: known fields only, no anti-bot bypass, step trail
                                         │
          approval ─► submission ─► applications (+evidence, confirmation)
+                                         │
+        application lifecycle + follow-up engine (typed reasons, priorities,
+        trigger-keys, derived due states) ─► immutable timeline events
+                                         │
+    analytics: funnel, response times, source quality, resume rank →
+    recommended resume, insights, follow-up health (deterministic)
 ```
 
 ## API surface
@@ -71,7 +81,11 @@ Endpoints live under `backend/app/api/routes/` (see the running server's
 | GET/POST/PUT | `/applications` | Package list / prepare / detail |
 | POST/PUT | `/applications/{id}/approve`, `/validate`, `/regenerate`, `/archive`, `/answers/{answer_id}`, `/cover-letter` | Package lifecycle |
 | GET/POST | `/applications/{id}/execution(/budget)` | Execution UI + budget |
-| POST    | `/applications/{id}/execution/{execution_id}/approve\\|cancel\\|resume\\|confirm` | Execution control |
+| POST    | `/applications/{id}/execution/{execution_id}/approve\|cancel\|resume\|confirm` | Execution control |
+| GET     | `/tracking/applications`, `/tracking/applications/{id}` | Application lifecycle + timeline view |
+| POST/PATCH | `/tracking/applications/{id}/status\|notes\|responses\|interviews\|offers\|follow-ups` | Lifecycle / event recording |
+| GET/POST | `/tracking/follow-ups`, `/tracking/follow-ups/summary`, `/tracking/follow-ups/{id}`, `.../{id}/complete\|skip\|restore\|reschedule\|cancel` | Follow-up engine API |
+| GET     | `/analytics/*` (funnel, roles, locations, companies, sources, resumes, resumes/compare, recommended-resume, sources/performance, response-times, response-times/breakdowns, insights, follow-ups, trends, applications) | Deterministic analytics |
 | GET     | `/companies` | Companies |
 
 ## Configuration

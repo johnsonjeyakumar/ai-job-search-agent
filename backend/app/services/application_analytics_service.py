@@ -27,6 +27,7 @@ from app.models.application_tracking import (
     ApplicationEvent,
 )
 from app.models.job import Job
+from app.services import application_lifecycle_service as lifecycle
 from app.services import company_service
 from app.services.application_lifecycle_service import follow_up_state
 
@@ -455,8 +456,10 @@ def _performance_rows(
     *,
     key_fn,
     label_fn=None,
+    apps: list[Application] | None = None,
 ) -> list[dict]:
-    apps = _applications(db)
+    if apps is None:
+        apps = _applications(db)
     milestones = _milestone_dates(db, apps)
     grouped: dict = {}
     order: list = []
@@ -554,6 +557,114 @@ def by_source(db: Session) -> list[dict]:
     )
 
 
+def by_application_source(db: Session) -> list[dict]:
+    """Performance grouped by where the application was actually submitted.
+
+    ``application_source`` is only set from a real recorded submission platform
+    (never fabricated); apps without one group as "No submission source".
+    """
+    return _performance_rows(
+        db,
+        key_fn=lambda app, job: app.application_source,
+        label_fn=lambda app, job: app.application_source or "No submission source",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Source intelligence (Phase 9): discovery + submission sources & quality
+# ---------------------------------------------------------------------------
+
+# Explicit, documented quality weights (sum to 1.0). Every component is a
+# verified rate with a real denominator; never LLM-derived.
+SOURCE_QUALITY_WEIGHTS = {
+    "submission_rate": 0.15,  # submitted / tracked applications from this source
+    "response_rate": 0.40,    # responses / submitted
+    "interview_rate": 0.30,   # interviews / submitted
+    "offer_rate": 0.15,       # offers / submitted
+}
+
+SOURCE_QUALITY_LABELS = {
+    "EXCELLENT SIGNAL",
+    "GOOD",
+    "PROMISING",
+    "LIMITED DATA",
+    "WEAK SIGNAL",
+    "INSUFFICIENT DATA",
+}
+
+
+def _source_quality(row: dict) -> dict:
+    """Deterministic 0-100 quality score + explicit band label for a source row.
+
+    Insufficient when nothing was submitted; ``LIMITED DATA`` whenever the
+    submitted sample is below the small-sample threshold (score still shown for
+    transparency). The ``basis`` field documents exactly what was used.
+    """
+    submitted = int(row.get("submitted") or 0)
+    if submitted == 0:
+        return {
+            "score": None,
+            "label": "INSUFFICIENT DATA",
+            "weighted_components": {},
+            "basis": SOURCE_QUALITY_BASIS,
+        }
+    components = {
+        "submission_rate": _pct(submitted, int(row.get("applications") or 0)),
+        "response_rate": row.get("response_rate"),
+        "interview_rate": row.get("interview_rate"),
+        "offer_rate": row.get("offer_rate"),
+    }
+    score = round(
+        sum(
+            (components[key] or 0.0) * weight
+            for key, weight in SOURCE_QUALITY_WEIGHTS.items()
+        ),
+        1,
+    )
+    if submitted < SMALL_SAMPLE_THRESHOLD:
+        label = "LIMITED DATA"
+    elif score >= 70:
+        label = "EXCELLENT SIGNAL"
+    elif score >= 50:
+        label = "GOOD"
+    elif score >= 35:
+        label = "PROMISING"
+    else:
+        label = "WEAK SIGNAL"
+    return {
+        "score": score,
+        "label": label,
+        "weighted_components": components,
+        "basis": SOURCE_QUALITY_BASIS,
+    }
+
+
+SOURCE_QUALITY_BASIS = (
+    "score = 0.15*submission_rate (submitted/tracked) + "
+    "0.40*response_rate + 0.30*interview_rate + 0.15*offer_rate "
+    "(rates over submitted)."
+)
+
+
+def source_performance(db: Session) -> dict:
+    """Discovery vs submission sources, each with a deterministic quality score."""
+    discovery = by_source(db)
+    submission = by_application_source(db)
+    return {
+        "quality_basis": SOURCE_QUALITY_BASIS,
+        "quality_weights": dict(SOURCE_QUALITY_WEIGHTS),
+        "small_sample_threshold": SMALL_SAMPLE_THRESHOLD,
+        "discovery": [
+            {**row, **{"source_quality": _source_quality(row)}}
+            for row in discovery
+        ],
+        "submission": [
+            {**row, **{"source_quality": _source_quality(row)}}
+            for row in submission
+        ],
+    }
+
+
 def by_resume(db: Session) -> list[dict]:
     def key_fn(app, job):
         if app.resume_id is None and not app.resume_name:
@@ -571,19 +682,219 @@ def by_resume(db: Session) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Follow-up summary
+# Resume intelligence (Phase 9)
+# ---------------------------------------------------------------------------
+
+RESUME_RANK_LABELS = ("STRONGER SIGNAL", "PROMISING", "LIMITED DATA", "INSUFFICIENT DATA")
+
+
+def _resume_rank(row: dict) -> dict:
+    """Deterministic resume rank inferred strictly from verified rates.
+
+    composite = interview_rate + offer_rate (0-200). Below the small-sample
+    threshold the label is always LIMITED DATA (score still shown for
+    transparency). Nothing here is AI-generated.
+    """
+    submitted = int(row.get("submitted") or 0)
+    composite = round(
+        (row.get("interview_rate") or 0.0) + (row.get("offer_rate") or 0.0), 1
+    )
+    if submitted == 0:
+        return {"composite_score": composite, "rank_label": "INSUFFICIENT DATA"}
+    if submitted < SMALL_SAMPLE_THRESHOLD:
+        return {"composite_score": composite, "rank_label": "LIMITED DATA"}
+    if composite >= 150:
+        return {"composite_score": composite, "rank_label": "STRONGER SIGNAL"}
+    if composite >= 100:
+        return {"composite_score": composite, "rank_label": "PROMISING"}
+    return {"composite_score": composite, "rank_label": "LIMITED DATA"}
+
+
+def _filter_apps(
+    db: Session,
+    *,
+    role: str | None = None,
+    location: str | None = None,
+    source: str | None = None,
+    company: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> list[Application]:
+    apps: list[Application] = []
+    for app in _applications(db):
+        job = db.get(Job, app.job_id)
+        job_title = job.title if job else None
+        job_company = job.company if job else None
+        job_location = job.location if job else None
+        job_source = job.source if job else None
+        if role and not _contains_any((job_title or ""), role):
+            continue
+        if location and not _contains_any((job_location or ""), location):
+            continue
+        if source and job_source != source:
+            continue
+        if company and not _contains_any((job_company or ""), company):
+            continue
+        if from_date or to_date:
+            when = app.applied_date or (app.created_at.date() if app.created_at else None)
+            if when is not None:
+                if from_date and when < date.fromisoformat(from_date):
+                    continue
+                if to_date and when > date.fromisoformat(to_date):
+                    continue
+        apps.append(app)
+    return apps
+
+
+def resume_performance(
+    db: Session,
+    *,
+    role: str | None = None,
+    location: str | None = None,
+    source: str | None = None,
+    company: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> list[dict]:
+    """Resume performance (historical snapshots kept), optionally filtered by
+    target role / location / discovery source / company / date window.
+
+    Each row carries verified rates plus a derived, deterministic rank label.
+    """
+    apps = _filter_apps(
+        db,
+        role=role,
+        location=location,
+        source=source,
+        company=company,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    def key_fn(app, job):
+        if app.resume_id is None and not app.resume_name:
+            return None
+        return app.resume_name or f"resume-{app.resume_id}"
+
+    def label_fn(app, job):
+        if app.resume_id is None and not app.resume_name:
+            return "No resume"
+        name = app.resume_name or f"Resume #{app.resume_id}"
+        version = f" · {app.resume_version}" if app.resume_version else ""
+        return f"{name}{version}"
+
+    rows = []
+    for row in _performance_rows(db, key_fn=key_fn, label_fn=label_fn, apps=apps):
+        ranked = _resume_rank(row)
+        rows.append(
+            {
+                **row,
+                "composite_score": ranked["composite_score"],
+                "rank_label": ranked["rank_label"],
+            }
+        )
+    rows.sort(
+        key=lambda r: (r.get("composite_score") or -1.0), reverse=True
+    )
+    return rows
+
+
+def recommended_resume(
+    db: Session,
+    *,
+    role: str | None = None,
+    location: str | None = None,
+    source: str | None = None,
+) -> dict:
+    """Deterministic resume recommendation for a target role / location / source.
+
+    Chooses the highest-composite resume with a qualified sample (at least
+    ``SMALL_SAMPLE_THRESHOLD`` submissions). No qualified data yields a plain
+    "not enough historical data" answer — never a fabricated pick.
+    """
+    rows = resume_performance(db, role=role, location=location, source=source)
+    candidates = [
+        {
+            "key": r["key"],
+            "label": r["label"],
+            "applications": r["applications"],
+            "submitted": r["submitted"],
+            "responses": r["responses"],
+            "interviews": r["interviews"],
+            "offers": r["offers"],
+            "response_rate": r["response_rate"],
+            "interview_rate": r["interview_rate"],
+            "offer_rate": r["offer_rate"],
+            "composite_score": r["composite_score"],
+            "rank_label": r["rank_label"],
+        }
+        for r in rows
+        if r["submitted"] > 0 and r["label"] != "No resume"
+    ]
+    candidates.sort(
+        key=lambda c: (c["composite_score"], c["submitted"]), reverse=True
+    )
+    qualified = [c for c in candidates if c["submitted"] >= SMALL_SAMPLE_THRESHOLD]
+    full_qualified = [
+        c for c in qualified if c["rank_label"] in ("STRONGER SIGNAL", "PROMISING")
+    ]
+    pool = full_qualified or qualified
+    winner = pool[0] if pool else None
+    alternative = pool[1] if len(pool) > 1 else None
+    if winner is None:
+        return {
+            "role": role,
+            "location": location,
+            "source": source,
+            "candidate": None,
+            "alternative": None,
+            "recommended_resume_id": None,
+            "message": "Not enough historical data to recommend a resume.",
+            "candidates": candidates,
+            "basis": (
+                "Composite = interview_rate + offer_rate over submissions with "
+                f"n >= {SMALL_SAMPLE_THRESHOLD}."
+            ),
+        }
+    return {
+        "role": role,
+        "location": location,
+        "source": source,
+        "candidate": winner,
+        "alternative": alternative,
+        "recommended_resume_id": winner["key"],
+        "message": None,
+        "candidates": candidates,
+        "basis": (
+            "Composite = interview_rate + offer_rate over submissions with "
+            f"n >= {SMALL_SAMPLE_THRESHOLD}."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Follow-up summary (app tracking widgets)
 # ---------------------------------------------------------------------------
 
 
 def follow_up_summary(db: Session) -> dict:
     today = _today()
     follow_ups = list(db.scalars(select(FollowUp).order_by(FollowUp.scheduled_date)))
+    rescheduled_apps = _rescheduled_follow_up_application_ids(db)
     rows = []
     due_today = due_this_week = overdue = upcoming = 0
     for fu in follow_ups:
         state = follow_up_state(fu, today)
+        lifecycle_state = lifecycle.follow_up_lifecycle_state(
+            fu,
+            rescheduled=fu.application_id in rescheduled_apps,
+            today=today,
+        )
         app = db.get(Application, fu.application_id) if fu.application_id else None
         job = db.get(Job, app.job_id) if app else None
+        days_late = None
+        if fu.scheduled_date is not None and fu.scheduled_date < today:
+            days_late = (today - fu.scheduled_date).days
         rows.append(
             {
                 "id": fu.id,
@@ -594,7 +905,19 @@ def follow_up_summary(db: Session) -> dict:
                 "reminder_date": fu.reminder_date.isoformat() if fu.reminder_date else None,
                 "completed_date": fu.completed_date.isoformat() if fu.completed_date else None,
                 "state": state,
+                "lifecycle_state": lifecycle_state,
                 "status": (fu.status or "PENDING").upper(),
+                "priority": (fu.priority or "MEDIUM").upper(),
+                "reason": (fu.reason or "SUBMISSION_FOLLOW_UP").upper(),
+                "trigger_status": fu.trigger_status,
+                "trigger_key": fu.trigger_key,
+                "application_status": app.lifecycle_status if app else None,
+                "application_source": app.application_source if app else None,
+                "resume_name": (app.resume_name if app else None),
+                "resume_version": (app.resume_version if app else None),
+                "days_late": days_late,
+                "overdue": state == "DUE" and fu.scheduled_date is not None
+                and fu.scheduled_date < today,
                 "notes": fu.notes,
             }
         )
@@ -616,8 +939,101 @@ def follow_up_summary(db: Session) -> dict:
         "due_this_week": due_this_week,
         "overdue": overdue,
         "upcoming": upcoming,
+        "completed": sum(1 for r in rows if r["status"] == "COMPLETED"),
+        "cancelled": sum(1 for r in rows if r["status"] == "CANCELLED"),
+        "skipped": sum(1 for r in rows if r["status"] == "SKIPPED"),
         "total": len(follow_ups),
         "items": rows,
+    }
+
+
+def _rescheduled_follow_up_application_ids(db: Session) -> set[int]:
+    rows = db.execute(
+        select(ApplicationEvent.application_id)
+        .where(ApplicationEvent.event_type == "FOLLOW_UP_RESCHEDULED")
+        .distinct()
+    ).all()
+    return {int(app_id) for (app_id,) in rows}
+
+
+def follow_ups_list(
+    db: Session,
+    *,
+    status: str | None = None,
+    priority: str | None = None,
+    due: bool = False,
+    overdue: bool = False,
+    application_id: int | None = None,
+    company: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> dict:
+    """Filterable follow-up list for the Phase 9 follow-up API.
+
+    Every filter is optional; ``due``/``overdue`` act on the derived
+    lifecycle state (DUE/OVERDUE), ``status`` on the stored status, and
+    dates on ``scheduled_date`` (inclusive).
+    """
+    body = follow_up_summary(db)
+    items = body["items"]
+    if status:
+        want = status.upper()
+        if want not in ("PENDING", "COMPLETED", "CANCELLED", "SKIPPED"):
+            raise ValueError(
+                "status must be one of PENDING, COMPLETED, CANCELLED, SKIPPED"
+            )
+    else:
+        want = None
+
+    def active_state(name: str) -> bool:
+        return name in ("DUE", "OVERDUE", "SCHEDULED", "RESCHEDULED")
+
+    def matches(row: dict) -> bool:
+        if want:
+            stored = row["status"]
+            if want == "PENDING":
+                if not active_state(row["lifecycle_state"]):
+                    return False
+            elif stored != want:
+                return False
+        if priority and row["priority"] != priority.upper():
+            return False
+        if due and row["lifecycle_state"] != "DUE":
+            return False
+        if overdue and row["lifecycle_state"] != "OVERDUE":
+            return False
+        if application_id is not None and row["application_id"] != application_id:
+            return False
+        if company and not _contains_any((row["company"] or ""), company):
+            return False
+        if from_date or to_date:
+            if not row["scheduled_date"]:
+                return False
+            when = date.fromisoformat(row["scheduled_date"])
+            if from_date and when < date.fromisoformat(from_date):
+                return False
+            if to_date and when > date.fromisoformat(to_date):
+                return False
+        return True
+
+    filtered = [row for row in items if matches(row)]
+    priorities = {"OVERDUE": 0, "DUE": 1, "RESCHEDULED": 2, "SCHEDULED": 3,
+                  "COMPLETED": 4, "SKIPPED": 5, "CANCELLED": 6}
+    filtered.sort(
+        key=lambda r: (
+            priorities.get(r["lifecycle_state"], 9),
+            r["scheduled_date"] or "9999-12-31",
+        )
+    )
+    return {
+        "total": len(filtered),
+        "filters": {
+            "status": status, "priority": priority, "due": due,
+            "overdue": overdue, "application_id": application_id,
+            "company": company, "from_date": from_date, "to_date": to_date,
+        },
+        "summary": body,
+        "items": filtered,
     }
 
 
@@ -739,6 +1155,225 @@ def tracking_rows(
 
     rows.sort(key=sort_key, reverse=(sort == "newest"))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Response-time breakdowns (Phase 9)
+# ---------------------------------------------------------------------------
+
+
+def response_time_breakdowns(db: Session) -> dict:
+    """Days from submission to first real response, split per dimension.
+
+    Only timestamps backed by immutable events (with the legacy fallback) are
+    counted; nothing is invented.
+    """
+    apps = _applications(db)
+    milestones = _milestone_dates(db, apps)
+    buckets = {
+        "role": {},
+        "location": {},
+        "discovery_source": {},
+        "submission_source": {},
+        "company": {},
+        "resume": {},
+    }
+    days_by_app: dict[int, int] = {}
+
+    def add(dimension: str, label: str, days: int) -> None:
+        buckets[dimension].setdefault(label, []).append(days)
+
+    for app in apps:
+        job = db.get(Job, app.job_id)
+        reached = milestones.get(app.id, {})
+        submit_dates = [
+            reached[s]
+            for s in ("SUBMITTED", "SUBMISSION_CONFIRMED")
+            if s in reached
+        ]
+        response_dates = [
+            reached[s]
+            for s in ("RESPONSE_RECEIVED", "INTERVIEW", "OFFER")
+            if s in reached
+        ]
+        if not submit_dates or not response_dates:
+            continue
+        submit = min(submit_dates)
+        respond = min(response_dates)
+        days = (respond - submit).days
+        days_by_app[app.id] = days
+        role = job.title if job else None
+        if role:
+            add("role", role, days)
+        loc = job.location if job else None
+        if loc:
+            add("location", loc, days)
+        src = job.source if job else None
+        if src:
+            add("discovery_source", src, days)
+        if app.application_source:
+            add("submission_source", app.application_source, days)
+        if job and job.company:
+            add("company", company_service.display_name_for(job.company) or job.company, days)
+        if app.resume_name or app.resume_id:
+            label = app.resume_name or f"Resume #{app.resume_id}"
+            if app.resume_version:
+                label = f"{label} · {app.resume_version}"
+            add("resume", label, days)
+
+    return {
+        "basis": (
+            "Days between submission and first real response "
+            "(RESPONSE_RECEIVED / INTERVIEW / OFFER milestone)."
+        ),
+        "overall": _stat(list(days_by_app.values())),
+        "dimensions": {
+            name: [
+                {"label": label, **_stat(days_list)}
+                for label, days_list in sorted(group.items(), key=lambda kv: -len(kv[1]))
+            ]
+            for name, group in buckets.items()
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Insights engine (Phase 9) — deterministic, evidence-only
+# ---------------------------------------------------------------------------
+
+
+def insights(db: Session) -> dict:
+    """Deterministic insights derived strictly from verified analytics.
+
+    Every insight carries its ``metrics`` evidence. No LLM, no guessing.
+    """
+    items: list[dict] = []
+    funnel_data = funnel(db)
+    sources = source_performance(db)
+    resumes = resume_performance(db)
+    follow_ups = follow_up_summary(db)
+    response = response_time_breakdowns(db)
+
+    steps = {s["step"]: s["count"] for s in funnel_data["steps"]}
+    submitted = steps.get("SUBMITTED") or 0
+    if submitted == 0:
+        return {
+            "items": [
+                {
+                    "key": "no_data",
+                    "severity": "info",
+                    "title": "Not enough data for insights yet",
+                    "message": (
+                        "Track applications, run executions, and record responses "
+                        "to unlock deterministic insights."
+                    ),
+                    "metrics": {"submitted": 0},
+                }
+            ],
+            "basis": "Insights only echo verified analytics; none are inferred.",
+        }
+
+    if response["overall"].get("measured", 0) > 0:
+        items.append(
+            {
+                "key": "response_speed",
+                "severity": "info",
+                "title": "Response speed",
+                "message": (
+                    f"Median time from submission to first response is "
+                    f"{response['overall']['median_days']} days across "
+                    f"{response['overall']['measured']} responses."
+                ),
+                "metrics": response["overall"],
+            }
+        )
+
+    best_discovery = [
+        s
+        for s in sources["discovery"]
+        if s["submitted"] >= SMALL_SAMPLE_THRESHOLD
+        and s["source_quality"]["score"] is not None
+    ]
+    if best_discovery:
+        best = max(best_discovery, key=lambda s: s["source_quality"]["score"])
+        items.append(
+            {
+                "key": "best_discovery_source",
+                "severity": "success" if best["source_quality"]["label"] in
+                ("EXCELLENT SIGNAL", "GOOD") else "info",
+                "title": "Strongest discovery source",
+                "message": (
+                    f"{best['label']} shows a {best['source_quality']['label']} "
+                    f"signal (quality {best['source_quality']['score']}/100) over "
+                    f"{best['submitted']} submissions."
+                ),
+                "metrics": best,
+            }
+        )
+
+    qualified_resumes = [
+        r for r in resumes if r["submitted"] >= SMALL_SAMPLE_THRESHOLD
+    ]
+    if qualified_resumes:
+        best_resume = max(
+            qualified_resumes, key=lambda r: r["composite_score"]
+        )
+        items.append(
+            {
+                "key": "best_resume",
+                "severity": "success" if best_resume["rank_label"] in
+                ("STRONGER SIGNAL", "PROMISING") else "info",
+                "title": "Strongest resume signal",
+                "message": (
+                    f"{best_resume['label']} has the strongest verified signal "
+                    f"(composite {best_resume['composite_score']}) over "
+                    f"{best_resume['submitted']} submissions."
+                ),
+                "metrics": {
+                    "label": best_resume["label"],
+                    "composite_score": best_resume["composite_score"],
+                    "submitted": best_resume["submitted"],
+                },
+            }
+        )
+
+    overdue = follow_ups.get("overdue", 0)
+    if overdue:
+        items.append(
+            {
+                "key": "overdue_follow_ups",
+                "severity": "warning",
+                "title": "Overdue follow-ups",
+                "message": (
+                    f"{overdue} follow-up(s) are overdue; handle them or skip "
+                    "them to keep the queue current."
+                ),
+                "metrics": {"overdue": overdue},
+            }
+        )
+
+    limited = sum(1 for r in resumes if r["limited_data"]) + sum(
+        1 for s in sources["discovery"] if s["limited_data"]
+    )
+    items.append(
+        {
+            "key": "sample_health",
+            "severity": "info",
+            "title": "Sample health",
+            "message": (
+                f"{limited} resume/source group(s) have a sample below "
+                f"{SMALL_SAMPLE_THRESHOLD} and are flagged 'Limited data'."
+                if limited
+                else f"All resume and source samples met the n={SMALL_SAMPLE_THRESHOLD} threshold."
+            ),
+            "metrics": {"limited_groups": limited, "threshold": SMALL_SAMPLE_THRESHOLD},
+        }
+    )
+
+    return {
+        "items": items,
+        "basis": "Insights only echo verified analytics; none are inferred.",
+    }
 
 
 def _contains_any(haystack: str, needle: str) -> bool:

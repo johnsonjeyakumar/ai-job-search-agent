@@ -389,6 +389,14 @@ def record_interview(
         metadata={"interview_type": interview_type, "round": round_number},
     )
     db.flush()
+    # Deterministic thank-you follow-up for this specific interview record.
+    schedule_interview_follow_up(
+        db,
+        application,
+        row,
+        source=source if source in ("SYSTEM", "EXECUTION") else "USER",
+    )
+    db.flush()
     return row
 
 
@@ -441,31 +449,47 @@ def follow_up_interval_days(db: Session) -> int:
     return int(prefs.follow_up_interval_days) if prefs is not None else 7
 
 
+def interview_follow_up_days(db: Session) -> int:
+    from app.models.preferences import Preferences
+
+    prefs = db.scalar(select(Preferences).order_by(Preferences.id).limit(1))
+    return int(prefs.interview_follow_up_days) if prefs is not None else 1
+
+
+# Lifecycle statuses for which NO follow-up is ever scheduled (they declare the
+# application ended). OFFER included: an offer stops further active follow-ups.
+_NO_FOLLOW_UP_STATUSES = frozenset(
+    {"REJECTED", "WITHDRAWN", "EXPIRED", "CANCELLED", "OFFER"}
+)
+
+
 def create_follow_up(
     db: Session,
     application: Application,
     *,
     source: str = "SYSTEM",
     scheduled_date: date | None = None,
+    reason: str = "SUBMISSION_FOLLOW_UP",
+    priority: str = "MEDIUM",
+    trigger_status: str | None = None,
+    trigger_key: str | None = None,
+    allow_extra_for_application: bool = False,
 ) -> FollowUp | None:
-    """Create one scheduled follow-up after submission (central interval).
+    """Create one deterministic follow-up (idempotent per trigger key).
 
-    Skipped when the application was rejected/withdrawn/expired/cancelled,
-    already has a response, or already has any follow-up.
+    Skipped when the application is in a no-follow-up lifecycle status
+    (rejected / withdrawn / expired / cancelled / offer) or already has a
+    response. A submission follow-up is deduped per trigger key, so repeated
+    hits of the same trigger never create duplicates. Distinct interviews are
+    allowed their own thank-you follow-up (``allow_extra_for_application``).
     """
-    if application.lifecycle_status in {
-        "REJECTED",
-        "WITHDRAWN",
-        "EXPIRED",
-        "CANCELLED",
-    }:
-        return None
-    existing_follow_up = db.scalar(
-        select(FollowUp.id).where(
-            FollowUp.application_id == application.id
-        ).limit(1)
-    )
-    if existing_follow_up is not None:
+    reason = (reason or "SUBMISSION_FOLLOW_UP").upper()
+    priority = (priority or "MEDIUM").upper()
+    if reason not in ("SUBMISSION_FOLLOW_UP", "INTERVIEW_THANK_YOU"):
+        raise TrackingError(f"Invalid follow-up reason: {reason!r}", 422)
+    if priority not in ("HIGH", "MEDIUM", "LOW"):
+        raise TrackingError(f"Invalid follow-up priority: {priority!r}", 422)
+    if application.lifecycle_status in _NO_FOLLOW_UP_STATUSES:
         return None
     existing_response = db.scalar(
         select(ApplicationResponse.id).where(
@@ -475,19 +499,57 @@ def create_follow_up(
     if existing_response is not None:
         return None
 
+    trigger_status = trigger_status or application.lifecycle_status
+    trigger_key = trigger_key or (
+        f"app:{application.id}:{reason}:{trigger_status}"
+    )
+    existing_by_key = db.scalar(
+        select(FollowUp.id).where(
+            FollowUp.application_id == application.id,
+            FollowUp.trigger_key == trigger_key,
+        ).limit(1)
+    )
+    if existing_by_key is not None:
+        return None
+    if not allow_extra_for_application:
+        any_follow_up = db.scalar(
+            select(FollowUp.id).where(
+                FollowUp.application_id == application.id
+            ).limit(1)
+        )
+        if any_follow_up is not None:
+            return None
+
     base_date = submit_date(application)
     scheduled = scheduled_date or (
         (base_date + timedelta(days=follow_up_interval_days(db)))
         if base_date is not None
         else date.today()
     )
+    label = reason.replace("_", " ").title()
+    if reason == "SUBMISSION_FOLLOW_UP":
+        note = (
+            f"Follow up {follow_up_interval_days(db)} days after submission."
+            if scheduled_date is None
+            else f"Follow up {submit_date(application)}."
+        )
+    else:
+        note = (
+            "Follow up after the interview"
+            if scheduled_date is None
+            else f"Follow up on {scheduled.isoformat()}."
+        )
     row = FollowUp(
         application_id=application.id,
         action_type="follow_up",
+        priority=priority,
+        reason=reason,
+        trigger_status=trigger_status,
+        trigger_key=trigger_key,
         scheduled_date=scheduled,
         reminder_date=scheduled,
         status="PENDING",
-        notes=f"Follow up {follow_up_interval_days(db)} days after submission.",
+        notes=note,
     )
     db.add(row)
     db.flush()
@@ -498,10 +560,45 @@ def create_follow_up(
         source=source,
         previous_status=application.lifecycle_status,
         new_status=application.lifecycle_status,
-        notes=f"Follow-up scheduled for {scheduled.isoformat()}.",
+        notes=f"{label} scheduled for {scheduled.isoformat()}.",
+        metadata={
+            "priority": priority,
+            "reason": reason,
+            "trigger_status": trigger_status,
+            "trigger_key": trigger_key,
+        },
     )
     db.flush()
     return row
+
+
+def schedule_interview_follow_up(
+    db: Session,
+    application: Application,
+    interview_record: InterviewRecord,
+    *,
+    source: str = "SYSTEM",
+) -> FollowUp | None:
+    """Deterministic thank-you follow-up after an interview is scheduled.
+
+    One follow-up per interview record (``trigger_key`` embeds the record id),
+    offset by the user-configurable ``interview_follow_up_days``.
+    """
+    if application.lifecycle_status in _NO_FOLLOW_UP_STATUSES:
+        return None
+    base = interview_record.interview_date
+    scheduled = base + timedelta(days=interview_follow_up_days(db))
+    return create_follow_up(
+        db,
+        application,
+        source=source,
+        scheduled_date=scheduled,
+        reason="INTERVIEW_THANK_YOU",
+        priority="HIGH",
+        trigger_status="INTERVIEW",
+        trigger_key=f"app:{application.id}:INTERVIEW_THANK_YOU:{interview_record.id}",
+        allow_extra_for_application=True,
+    )
 
 
 def follow_up_state(follow_up: FollowUp, today: date | None = None) -> str:
@@ -516,6 +613,37 @@ def follow_up_state(follow_up: FollowUp, today: date | None = None) -> str:
     if follow_up.scheduled_date is not None and follow_up.scheduled_date <= today:
         return "DUE"
     return "PENDING"
+
+
+def follow_up_lifecycle_state(
+    follow_up: FollowUp,
+    *,
+    rescheduled: bool = False,
+    today: date | None = None,
+) -> str:
+    """Full Phase 9 follow-up lifecycle state (SCHEDULED/DUE/OVERDUE/
+    RESCHEDULED/COMPLETED/CANCELLED/SKIPPED), fully derived and deterministic.
+
+    Stored terminal status wins; then OVERDUE/DUE (active, past/equal date);
+    then RESCHEDULED for active future follow-ups with a reschedule event;
+    then SCHEDULED (a plain future/undated active follow-up).
+    """
+    stored = (follow_up.status or "PENDING").upper()
+    if stored == "COMPLETED":
+        return "COMPLETED"
+    if stored == "CANCELLED":
+        return "CANCELLED"
+    if stored == "SKIPPED":
+        return "SKIPPED"
+    today = today or date.today()
+    when = follow_up.scheduled_date
+    if when is not None and when < today:
+        return "OVERDUE"
+    if when is not None and when == today:
+        return "DUE"
+    if rescheduled:
+        return "RESCHEDULED"
+    return "SCHEDULED"
 
 
 def complete_follow_up(
@@ -595,6 +723,74 @@ def cancel_follow_up(
         previous_status=None,
         new_status=None,
         notes=notes or "Follow-up cancelled.",
+    )
+    db.flush()
+    return follow_up
+
+
+def skip_follow_up(
+    db: Session,
+    follow_up: FollowUp,
+    *,
+    notes: str | None = None,
+    source: str = "USER",
+) -> FollowUp:
+    """Skip a follow-up without treating it as completed (e.g. no action
+    needed). Distinct from cancellation: skipped is a deliberate "don't
+    follow up on this trigger" decision with its own immutable event."""
+    if (follow_up.status or "PENDING").upper() in (
+        "COMPLETED",
+        "CANCELLED",
+        "SKIPPED",
+    ):
+        raise TrackingError("Follow-up already finished.", 409)
+    follow_up.status = "SKIPPED"
+    follow_up.skipped_at = datetime.now()
+    if notes:
+        follow_up.notes = (follow_up.notes or "") + f"\n{notes}".strip()
+    record_application_event(
+        db,
+        follow_up.application_id,
+        "FOLLOW_UP_SKIPPED",
+        source=source,
+        previous_status=None,
+        new_status=None,
+        notes=notes or "Follow-up skipped.",
+    )
+    db.flush()
+    return follow_up
+
+
+def restore_follow_up(
+    db: Session,
+    follow_up: FollowUp,
+    *,
+    notes: str | None = None,
+    source: str = "USER",
+) -> FollowUp:
+    """Reopen a cancelled/skipped follow-up (keeps the original scheduled date
+    unless it already passed, in which case it moves to today). Any historical
+    terminal events stay in the immutable timeline."""
+    if (follow_up.status or "PENDING").upper() in ("PENDING",):
+        raise TrackingError("Follow-up is already active.", 409)
+    previous = (follow_up.status or "PENDING").upper()
+    follow_up.status = "PENDING"
+    today = date.today()
+    if follow_up.scheduled_date is not None and follow_up.scheduled_date < today:
+        follow_up.scheduled_date = today
+        follow_up.reminder_date = today
+    follow_up.skipped_at = None
+    if notes:
+        follow_up.notes = (follow_up.notes or "") + f"\n{notes}".strip()
+    record_application_event(
+        db,
+        follow_up.application_id,
+        "FOLLOW_UP_RESTORED",
+        source=source,
+        previous_status=None,
+        new_status=None,
+        notes=notes or f"Follow-up reopened (was {previous}).",
+        metadata={"restored_from": previous},
     )
     db.flush()
     return follow_up

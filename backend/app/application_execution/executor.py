@@ -836,6 +836,7 @@ def _upsert_application_tracker(
             lifecycle_status="DISCOVERED",
             applied_date=date.today(),
             application_url=execution.confirmation_url,
+            application_source=execution.platform,
             notes=f"Execution #{execution.id}: {note}",
         )
         db.add(row)
@@ -854,6 +855,7 @@ def _upsert_application_tracker(
         row.status = legacy
         row.applied_date = date.today()
         row.application_url = execution.confirmation_url or row.application_url
+        row.application_source = execution.platform or row.application_source
         row.notes = f"Execution #{execution.id}: {note}"
         if row.resume_name is None and resume is not None:
             row.resume_id = package.selected_resume_id

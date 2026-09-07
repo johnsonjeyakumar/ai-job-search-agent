@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: "/companies", label: "Companies" },
   { to: "/recommendations", label: "Recommendations" },
   { to: "/applications", label: "Applications" },
+  { to: "/analytics", label: "Analytics" },
   { to: "/resumes", label: "Resumes" },
   { to: "/recruiters", label: "Recruiters" },
   { to: "/profile", label: "Profile" },

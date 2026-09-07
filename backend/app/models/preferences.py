@@ -40,6 +40,8 @@ class Preferences(Base):
     # Phase 8 follow-up scheduling (central config, applied when an
     # application is first submitted).
     follow_up_interval_days: Mapped[int] = mapped_column(Integer, default=7)
+    # Phase 9: thank-you follow-up offset after an interview is scheduled.
+    interview_follow_up_days: Mapped[int] = mapped_column(Integer, default=1)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
