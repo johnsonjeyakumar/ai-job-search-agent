@@ -396,11 +396,11 @@ export default function Dashboard() {
           <StatCard label="Evaluated jobs" value={stats?.matches?.evaluated_jobs ?? 0} />
           <StatCard
             label="Avg match"
-            value={stats?.matches?.avg_match_score != null ? `${stats.matches.avg_match_score}/100` : "—"}
+            value={stats?.matches?.average_match_score != null ? `${stats.matches.average_match_score}/100` : "—"}
           />
           <StatCard
             label="Avg opportunity"
-            value={stats?.matches?.avg_opportunity_score != null ? `${stats.matches.avg_opportunity_score}/100` : "—"}
+            value={stats?.matches?.average_opportunity_score != null ? `${stats.matches.average_opportunity_score}/100` : "—"}
           />
           <StatCard
             label="Avg quality"

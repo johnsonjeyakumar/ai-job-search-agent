@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.application_tracking.events import timeline
+from app.application_tracking.status import InvalidStatusError
 from app.database.session import get_db
 from app.models.application_tracking import (
     APPLICATION_EVENTS,
@@ -33,6 +34,8 @@ def _handle(e: Exception) -> HTTPException:
         return HTTPException(status_code=e.status_code, detail=e.message)
     if isinstance(e, ValueError):
         return HTTPException(status_code=422, detail=str(e))
+    if isinstance(e, InvalidStatusError):
+        return HTTPException(status_code=422, detail=f"Invalid application status: {e.value!r}")
     return HTTPException(status_code=500, detail=str(e))
 
 
@@ -60,7 +63,6 @@ def list_applications(
     if sort not in _ALLOWED_SORTS:
         raise HTTPException(status_code=422, detail=f"sort must be one of {_ALLOWED_SORTS}")
     if status and status not in TRACKING_STATUSES:
-        from app.application_tracking.status import InvalidStatusError
         raise _handle(InvalidStatusError(status))
     try:
         rows = analytics.tracking_rows(
@@ -390,10 +392,13 @@ def complete_follow_up(
     db: Session = Depends(get_db),
 ) -> dict:
     follow_up = _follow_up_or_404(db, follow_up_id)
-    lifecycle.complete_follow_up(
-        db, follow_up, notes=payload.notes if payload else None
-    )
-    db.commit()
+    try:
+        lifecycle.complete_follow_up(
+            db, follow_up, notes=payload.notes if payload else None
+        )
+        db.commit()
+    except Exception as exc:
+        raise _handle(exc) from exc
     return {"message": "Follow-up completed.", "follow_up_id": follow_up.id}
 
 
@@ -421,10 +426,13 @@ def cancel_follow_up(
     db: Session = Depends(get_db),
 ) -> dict:
     follow_up = _follow_up_or_404(db, follow_up_id)
-    lifecycle.cancel_follow_up(
-        db, follow_up, notes=payload.notes if payload else None
-    )
-    db.commit()
+    try:
+        lifecycle.cancel_follow_up(
+            db, follow_up, notes=payload.notes if payload else None
+        )
+        db.commit()
+    except Exception as exc:
+        raise _handle(exc) from exc
     return {"message": "Follow-up cancelled.", "follow_up_id": follow_up.id}
 
 

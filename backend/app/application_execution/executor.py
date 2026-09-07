@@ -796,6 +796,7 @@ def _upsert_application_tracker(
 
     from sqlalchemy import select
 
+    from app.application_tracking import status as app_status
     from app.application_tracking.events import record_application_event
     from app.models.application import Application
     from app.models.resume import Resume
@@ -833,7 +834,7 @@ def _upsert_application_tracker(
             resume_name=resume.name if resume is not None else None,
             resume_version=resume.version if resume is not None else None,
             status=legacy,
-            lifecycle_status="DISCOVERED",
+            lifecycle_status=target_status,
             applied_date=date.today(),
             application_url=execution.confirmation_url,
             application_source=execution.platform,
@@ -841,17 +842,19 @@ def _upsert_application_tracker(
         )
         db.add(row)
         db.flush()
+        new_row = True
         record_application_event(
             db,
             row.id,
             "APPLICATION_CREATED",
             source="EXECUTION",
             previous_status=None,
-            new_status="DISCOVERED",
+            new_status=target_status,
             notes=note,
             metadata={"job_id": package.job_id, "execution_id": execution.id},
         )
     else:
+        new_row = False
         row.status = legacy
         row.applied_date = date.today()
         row.application_url = execution.confirmation_url or row.application_url
@@ -862,9 +865,8 @@ def _upsert_application_tracker(
             row.resume_name = resume.name
             row.resume_version = resume.version
 
-    # Move through the controlled state machine (legal edge only); record a
-    # transparent history marker if the row is already beyond SUBMITTED (e.g.
-    # a repeat submission after a response) instead of silently corrupting it.
+    # Move through the controlled state machine (legal edge only).
+    before_status = row.lifecycle_status
     try:
         application_lifecycle_service.move_lifecycle(
             db,
@@ -874,18 +876,38 @@ def _upsert_application_tracker(
             notes=note,
             metadata={"execution_id": execution.id, "confirmed": confirmed},
         )
+        moved = row.lifecycle_status == target_status and before_status != target_status
     except application_lifecycle_service.TrackingError:
+        moved = False
+        if before_status != target_status:
+            record_application_event(
+                db,
+                row.id,
+                target_status,
+                source="EXECUTION",
+                previous_status=row.lifecycle_status,
+                new_status=row.lifecycle_status,
+                notes=f"Repeat submission for execution #{execution.id}: {note}",
+                metadata={"execution_id": execution.id, "confirmed": confirmed},
+            )
+
+    # move_lifecycle returns early when the row is already at the target
+    # status (e.g. a new row created at SUBMISSION_CONFIRMED).  Record the
+    # milestone event and create the follow-up for a genuine first-time
+    # confirmation so that the audit trail and follow-up engine stay consistent.
+    if not moved and new_row:
         record_application_event(
             db,
             row.id,
-            target_status,
+            app_status.default_event_for_status(target_status),
             source="EXECUTION",
-            previous_status=row.lifecycle_status,
-            new_status=row.lifecycle_status,
-            notes=f"Repeat submission for execution #{execution.id}: {note}",
+            previous_status=None,
+            new_status=target_status,
+            notes=note,
             metadata={"execution_id": execution.id, "confirmed": confirmed},
         )
-    # Reference mirror of the state machine helpers for clarity (no-op).
+        application_lifecycle_service.create_follow_up(db, row, source="EXECUTION")
+
     db.flush()
 
 
