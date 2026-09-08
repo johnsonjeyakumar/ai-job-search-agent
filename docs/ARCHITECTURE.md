@@ -55,13 +55,23 @@ JobSource (Apify) ──► normalize ──► jobs (DB)
                                         │
         execution: known fields only, no anti-bot bypass, step trail
                                         │
-         approval ─► submission ─► applications (+evidence, confirmation)
-                                         │
-        application lifecycle + follow-up engine (typed reasons, priorities,
-        trigger-keys, derived due states) ─► immutable timeline events
-                                         │
-    analytics: funnel, response times, source quality, resume rank →
-    recommended resume, insights, follow-up health (deterministic)
+        approval ─► submission ─► applications (+evidence, confirmation)
+                                          │
+         application lifecycle + follow-up engine (typed reasons, priorities,
+         trigger-keys, derived due states) ─► immutable timeline events
+                                          │
+     analytics: funnel, response times, source quality, resume rank →
+     recommended resume, insights, follow-up health (deterministic)
+
+     ── Phase 13: Queue & Autopilot ──
+
+                    application queue (priority-scored, attention-classified)
+                                          │
+                    autopilot run (batch-process queue items)
+                                          │
+                    preflight → attention (AUTO/ASK/REVIEW/BLOCK)
+                                          │
+                    AUTO items → Phase 12 executor (existing engine)
 ```
 
 ## API surface
@@ -87,6 +97,8 @@ Endpoints live under `backend/app/api/routes/` (see the running server's
 | GET/POST | `/tracking/follow-ups`, `/tracking/follow-ups/summary`, `/tracking/follow-ups/{id}`, `.../{id}/complete\|skip\|restore\|reschedule\|cancel` | Follow-up engine API |
 | GET     | `/analytics/*` (funnel, roles, locations, companies, sources, resumes, resumes/compare, recommended-resume, sources/performance, response-times, response-times/breakdowns, insights, follow-ups, trends, applications) | Deterministic analytics |
 | GET     | `/companies` | Companies |
+| GET/POST | `/queue`, `/queue/stats`, `/queue/enqueue`, `/queue/{id}`, `/queue/{id}/preflight\|resolve\|skip\|transition` | Application queue management |
+| POST/GET | `/queue/autopilot/start\|pause\|resume\|stop`, `/queue/autopilot/status` | Autopilot orchestration |
 
 ## Configuration
 

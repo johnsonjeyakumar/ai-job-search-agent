@@ -76,6 +76,58 @@ function RecommendationBars({ counts }) {
   );
 }
 
+function SkillReadinessWidget() {
+  const [analyses, setAnalyses] = useState([]);
+
+  useEffect(() => {
+    apiGet("/skills/gap-analysis").then(setAnalyses).catch(() => {});
+  }, []);
+
+  if (analyses.length === 0) return null;
+
+  const latest = analyses[0];
+  const color =
+    latest.readiness_percentage >= 80
+      ? "bg-emerald-500"
+      : latest.readiness_percentage >= 50
+        ? "bg-amber-500"
+        : "bg-rose-500";
+
+  return (
+    <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Skill Readiness</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            {latest.missing_skills?.length || 0} skills to develop ·{" "}
+            {latest.matched_skills?.length || 0} matched
+          </p>
+        </div>
+        <Link
+          to="/skills"
+          className="text-xs text-blue-600 hover:underline"
+        >
+          View details →
+        </Link>
+      </div>
+      <div className="mt-3">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs text-slate-500">Readiness</span>
+          <div className="flex-1 h-2.5 rounded-full bg-slate-100 overflow-hidden">
+            <div
+              className={`h-full ${color} transition-all`}
+              style={{ width: `${latest.readiness_percentage}%` }}
+            />
+          </div>
+          <span className="text-xs font-semibold text-slate-700">
+            {latest.readiness_percentage}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const RATE_LABELS = {
   shortlist_rate: "Shortlisted",
   application_rate: "Applied",
@@ -512,6 +564,8 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <SkillReadinessWidget />
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="text-sm font-semibold text-slate-900">Backend Status</h3>

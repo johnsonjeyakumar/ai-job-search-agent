@@ -100,11 +100,59 @@ the next begins. No phase auto-starts.
 - [ ] Recruiter contact automation deliberately out of scope (no email/messaging
       automation) — recruiters remain a manual, tracked list
 
-## Phase 10 — Multi-Provider & Production Hardening
+## Phase 10 — Multi-Provider & Production Hardening ✅
 
 - Concrete AI provider + expandable Apify/generic job sources
 - Auth, deployment, real-driver coverage for platforms where automation is
   explicitly permitted
+
+## Phase 11 — Skill Taxonomy, Evidence & Market Intelligence ✅
+
+- [x] Skill taxonomy with 130+ canonical names
+- [x] Strong/weak evidence separation
+- [x] "Why this skill matters" builder
+- [x] Skill history with immutable records
+- [x] Learning resources with URL validation
+- [x] Enhanced readiness formula (PARTIAL=50% credit)
+- [x] Market demand intelligence
+- [x] Interview signal detection
+- [x] Confidence scoring
+- [x] Learning plans with PARTIAL skills
+- [x] Practical tasks with evidence verification
+- [x] 37 new tests; full suite 477✅
+
+## Phase 11.1 — Frontend Enhancements ✅
+
+- [x] Skill detail view with evidence, resources, history
+- [x] Enhanced learning workspace with resource management
+- [x] Demand column in skills table
+- [x] Playwright E2E verification
+- [x] Phase 11 documentation
+
+## Phase 12 — Advanced Application Automation Engine ✅
+
+- [x] Semantic field mapping with multi-strategy approach
+- [x] Application memory with verified answer reuse
+- [x] Question normalization and classification
+- [x] Evidence-bound answer generation
+- [x] 8-stage mapping pipeline
+- [x] Checkpointing and execution recovery
+- [x] Browser resilience and retry logic
+- [x] Human approval boundaries
+- [x] Idempotency for safe retries
+- [x] Execution evidence tracking
+- [x] Analytics and performance metrics
+- [x] Security controls and field classification
+- [x] API endpoints for all components
+- [x] 49 new tests; full suite 526✅
+- [x] Documentation: `docs/PHASE12.md`
+
+## Phase 13 — Browser Automation Integration (PLANNED)
+
+- Real Playwright browser drivers for each platform
+- Automated form filling with human approval
+- CAPTCHA detection and human handoff
+- Session management and cookie handling
 
 ## Safety constraints (all phases)
 

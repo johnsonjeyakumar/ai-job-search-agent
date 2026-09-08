@@ -34,6 +34,7 @@ class Preferences(Base):
     # Phase 7 execution controls (user-configurable, not hard-coded).
     daily_application_target: Mapped[int | None] = mapped_column(Integer)
     daily_application_maximum: Mapped[int | None] = mapped_column(Integer)
+    max_concurrent_executions: Mapped[int | None] = mapped_column(Integer)
     # {"linkedin": "HUMAN_ASSISTED", "indeed": "PERMITTED_BROWSER", ...}
     platform_policies: Mapped[dict] = mapped_column(JSONB, default=dict)
 

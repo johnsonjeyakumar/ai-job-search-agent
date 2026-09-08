@@ -15,6 +15,7 @@ from app.models.application_package import (
     ApplicationTailoringSuggestion,
     ApplicationValidationFinding,
 )
+from app.models.application_queue import ApplicationQueueItem, AutopilotRun
 from app.models.application_tracking import (
     ApplicationEvent,
     ApplicationResponse,
@@ -62,6 +63,8 @@ __all__ = [
     "ApplicationResponse",
     "InterviewRecord",
     "OfferRecord",
+    "ApplicationQueueItem",
+    "AutopilotRun",
     "AutomationRun",
     "AutomationError",
     "Interview",

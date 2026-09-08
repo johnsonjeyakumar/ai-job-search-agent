@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import { AppDataProvider } from "./context/AppDataContext.jsx";
 import Layout from "./components/Layout.jsx";
 import Analytics from "./pages/Analytics.jsx";
+import ApplicationQueue from "./pages/ApplicationQueue.jsx";
 import Applications from "./pages/Applications.jsx";
 import ApplicationTracker from "./pages/ApplicationTracker.jsx";
 import ApplicationTracking from "./pages/ApplicationTracking.jsx";
@@ -19,6 +20,7 @@ import Recommendations from "./pages/Recommendations.jsx";
 import Recruiters from "./pages/Recruiters.jsx";
 import Resumes from "./pages/Resumes.jsx";
 import Settings from "./pages/Settings.jsx";
+import SkillGap from "./pages/SkillGap.jsx";
 
 export default function App() {
   return (
@@ -32,6 +34,7 @@ export default function App() {
           <Route path="/companies" element={<Companies />} />
           <Route path="/recommendations" element={<Recommendations />} />
           <Route path="/applications" element={<ApplicationTracker />} />
+          <Route path="/application-queue" element={<ApplicationQueue />} />
           <Route path="/applications/packages" element={<Applications />} />
           <Route path="/applications/track/:id" element={<ApplicationTracking />} />
           <Route path="/applications/:id/execute" element={<ExecutionPage />} />
@@ -41,6 +44,7 @@ export default function App() {
           <Route path="/recruiters" element={<Recruiters />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/preferences" element={<Preferences />} />
+          <Route path="/skills" element={<SkillGap />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/logs" element={<Logs />} />
         </Routes>
