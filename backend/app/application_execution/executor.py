@@ -123,12 +123,15 @@ def _run_multi_page_execution(
 ) -> dict:
     """Run multi-page form orchestration.
 
+    Phase 17: Integrates file upload handling, normalization, evidence, and approval.
+
     Returns a dict with keys: fields_filled, resume_uploaded, required_unfilled,
     new_questions, fills, session_data, warnings_added.
     """
     from app.application_execution.checkpoint import (
         CheckpointStore,
     )
+    from app.application_execution.evidence_tracker import EvidenceStore
     from app.application_execution.form_orchestrator import (
         detect_dynamic_changes,
         fill_page_fields,
@@ -136,12 +139,18 @@ def _run_multi_page_execution(
         map_page_fields,
         navigate_to_next,
         validate_page,
+        resolve_file_for_upload,
+        validate_and_upload_file,
+        maybe_request_file_approval,
+        record_fill_evidence,
+        record_file_evidence,
     )
     from app.application_execution.form_session import (
         FormSession,
         FormSessionState,
         PageType,
     )
+    from app.application_execution.human_approval import ApprovalStore
 
     session = FormSession(
         session_id=f"exec-{execution.id}",
@@ -150,6 +159,8 @@ def _run_multi_page_execution(
         package_id=execution.package_id,
     )
     checkpoint_store = CheckpointStore()
+    evidence_store = EvidenceStore()
+    approval_store = ApprovalStore()
 
     total_fields_filled = 0
     total_resume_uploaded = False
@@ -224,8 +235,69 @@ def _run_multi_page_execution(
                     up = driver.upload_resume(data, file_name or "resume", ct)
                     if up.status == base.KNOWN:
                         total_resume_uploaded = True
+                        record_file_evidence(
+                            evidence_store, f"exec-{execution.id}",
+                            page_num * 5, "Upload Resume", "resume",
+                            file_name or "resume.pdf", ct, True,
+                        )
 
-        # --- Fill known fields ---
+        # --- Phase 17: Fill file fields (non-resume) with validation ---
+        file_fields_to_upload = [
+            f for f in mapping.fields
+            if f.detected.kind == "file" and f.classification == base.KNOWN
+        ]
+        for mapped_file in file_fields_to_upload:
+            doc_type = None
+            from app.application_execution.file_handler import detect_document_type_from_label
+            doc_type = detect_document_type_from_label(mapped_file.detected.label or "")
+
+            if doc_type == "resume":
+                continue  # already handled above
+
+            # Check if approval needed for ambiguous/sensitive documents
+            accepted = getattr(mapped_file.detected, "accepted_types", []) or []
+            is_ambiguous = len(accepted) > 1
+            approval_action = maybe_request_file_approval(
+                approval_store, f"exec-{execution.id}",
+                mapped_file.detected.label, doc_type or "other",
+                is_ambiguous=is_ambiguous,
+                accepted_types=accepted,
+            )
+            if approval_action:
+                _add_warning(
+                    db, execution.id, "upload_resume",
+                    f"File upload '{mapped_file.detected.label}' requires approval.",
+                )
+                warnings_added += 1
+                continue
+
+            # Resolve file
+            data, fn, ct, dt, err = resolve_file_for_upload(
+                mapped_file.detected, resume=resume,
+                package_id=execution.package_id,
+            )
+            if err:
+                _add_warning(db, execution.id, "upload_resume", err)
+                warnings_added += 1
+                continue
+            if data is None:
+                # Non-resume files without data are skipped
+                continue
+
+            result, upload_err = validate_and_upload_file(
+                driver, data, fn or "file", ct or "application/pdf",
+                dt or "other", package_id=execution.package_id,
+            )
+            record_file_evidence(
+                evidence_store, f"exec-{execution.id}",
+                page_num * 5, mapped_file.detected.label,
+                dt or "other", fn or "file", ct or "application/pdf",
+                result.status == base.KNOWN,
+                validation_result=result.status,
+                error=upload_err,
+            )
+
+        # --- Fill known fields (with normalization) ---
         fill_page_fields(session, driver, mapping)
         for f in mapping.fields:
             if f.classification == base.KNOWN and f.value and f.detected.kind != "file":
@@ -233,8 +305,15 @@ def _run_multi_page_execution(
                     "field_key": f.detected.key,
                     "label": f.detected.label,
                     "value": f.value,
+                    "kind": f.detected.kind,
                 })
                 total_fields_filled += 1
+                record_fill_evidence(
+                    evidence_store, f"exec-{execution.id}",
+                    page_num * 5, f.detected.label,
+                    f.matched_key, f.value, f.detected.kind,
+                    page_url=current_url,
+                )
 
         # Track new questions and required unfilled
         for q in mapping.new_questions:
@@ -780,22 +859,43 @@ def run_execution(
             )
 
             # -- fill known fields -------------------------------------------
+            from app.application_execution.evidence_tracker import EvidenceStore
+            evidence_store = EvidenceStore()
+
             fills: list[dict] = []
             fields_filled = 0
             if adapter.allows_fill_known(mode):
                 for f in mapped.fields:
                     if f.classification != base.KNOWN or f.detected.kind == "file":
                         continue
+
+                    # Phase 17: normalize value before filling
+                    from app.application_execution.form_orchestrator import normalize_field_value
+                    normalized_value, norm_error = normalize_field_value(f, f.detected)
+                    if norm_error:
+                        _add_warning(db, execution.id, "fill_fields",
+                                     f"'{f.detected.label}' normalization failed: {norm_error}")
+                        continue
+
+                    fill_value = normalized_value or f.value or ""
                     if f.matched_key == "answer":
                         mapped.answered_questions = getattr(mapped, "answered_questions", 0) + 1
-                    result = driver.fill(f.detected.key, f.value or "")
+                    result = driver.fill(f.detected.key, fill_value)
                     fills.append({
                         "field_key": f.detected.key,
                         "label": f.detected.label,
-                        "value": f.value or "",
+                        "value": fill_value,
+                        "kind": f.detected.kind,
                     })
                     if result.status == base.KNOWN:
                         fields_filled += 1
+                        # Record evidence
+                        from app.application_execution.form_orchestrator import record_fill_evidence
+                        record_fill_evidence(
+                            evidence_store, str(execution.id),
+                            0, f.detected.label, f.matched_key,
+                            fill_value, f.detected.kind,
+                        )
                     else:
                         _add_warning(db, execution.id, "fill_fields",
                                      f"'{f.detected.label}' fill failed: {result.message}")
@@ -1076,13 +1176,27 @@ def submit_execution(db: Session, execution: ApplicationExecution) -> Applicatio
             return execution
 
         driver.open(url or "mock://simple-form")
-        # replay the known (safe) fills from the approval step.
+        # replay the known (safe) fills from the approval step, with normalization.
         for item in fills:
             key = item.get("field_key")
             value = item.get("value") or ""
+            kind = item.get("kind", "text")
             if not key:
                 continue
-            driver.fill(key, value)
+
+            # Phase 17: normalize value for re-fill
+            from app.application_execution.form_orchestrator import normalize_field_value
+            from app.application_execution.fields import MappedField
+            from app.application_execution.base import DetectedField, KNOWN
+
+            # Create a temporary MappedField for normalization
+            dummy_detected = DetectedField(key=key, label=key, kind=kind)
+            dummy_mapped = MappedField(
+                detected=dummy_detected, matched_key=key,
+                value=value, classification=KNOWN,
+            )
+            normalized, _ = normalize_field_value(dummy_mapped, dummy_detected)
+            driver.fill(key, normalized or value)
         if resume_info.get("file_name"):
             data, _, _ = _resume_bytes(_resume)
             if data is not None:

@@ -24,6 +24,9 @@ class ApprovalAction(str, Enum):
     RECOVER_FROM_ERROR = "RECOVER_FROM_ERROR"
     ABORT_APPLICATION = "ABORT_APPLICATION"
     SKIP_QUESTION = "SKIP_QUESTION"
+    # Phase 16: file upload approval
+    UPLOAD_FILE = "UPLOAD_FILE"
+    AMBIGUOUS_DOCUMENT_SELECTION = "AMBIGUOUS_DOCUMENT_SELECTION"
 
 
 class ApprovalStatus(str, Enum):

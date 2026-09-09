@@ -123,7 +123,8 @@ class FieldSpec:
     kinds: tuple[str, ...] = ("text", "select", "radio")
 
 
-KIND_ANY = ("text", "textarea", "select", "radio", "date")
+KIND_ANY = ("text", "textarea", "select", "radio", "date", "checkbox",
+            "multi_select", "currency", "autocomplete", "file")
 
 _FIELD_SPECS: list[FieldSpec] = [
     FieldSpec("first_name", ["first name", "first", "given name", "firstname"],
@@ -185,6 +186,29 @@ _FIELD_SPECS: list[FieldSpec] = [
               sensitive=True),
     FieldSpec("skills", ["skills", "skill set", "technical skills", "key skills"],
               "skills"),
+    # Phase 17: advanced control fields
+    FieldSpec("terms_acceptance", ["terms", "terms and conditions",
+              "i agree to the terms", "terms of service"], "terms_acceptance",
+              kinds=("checkbox",)),
+    FieldSpec("data_consent", ["consent", "data consent", "i consent",
+              "data processing consent"], "data_consent",
+              kinds=("checkbox",)),
+    FieldSpec("work_preference", ["work preference", "work mode",
+              "work location", "remote preference"], "work_preference",
+              kinds=("select", "radio")),
+    FieldSpec("skills_multi", ["preferred technologies", "tech stack",
+              "technologies"], "skills_multi",
+              kinds=("multi_select", "text")),
+    FieldSpec("availability_date", ["availability date", "start date",
+              "available from", "earliest start date"], "availability_date",
+              kinds=("date", "text")),
+    FieldSpec("graduation_date", ["graduation date", "date of graduation"],
+              "graduation_date", kinds=("date", "text")),
+    FieldSpec("expected_salary", ["expected salary", "desired compensation",
+              "salary expectation"], "expected_salary",
+              sensitive=True, kinds=("currency", "text")),
+    FieldSpec("city_location", ["city/location"], "city_location",
+              kinds=("autocomplete", "text", "select")),
 ]
 
 # sensitively tracked values: profile *may* hold them but we never guess.
@@ -215,6 +239,15 @@ _PROVIDERS = {
     "gender": lambda c: None,
     "current_ctc": lambda c: None,
     "skills": lambda c: c.skills_text,
+    # Phase 17: advanced field providers
+    "terms_acceptance": lambda c: None,  # never auto-accept terms
+    "data_consent": lambda c: None,  # never auto-consent
+    "work_preference": lambda c: c.remote_preference,
+    "skills_multi": lambda c: c.skills_text,
+    "availability_date": lambda c: None,  # not auto-derived
+    "graduation_date": lambda c: str(c.graduation_year) if c.graduation_year else None,
+    "expected_salary": lambda c: c.salary_preference,
+    "city_location": lambda c: c.city,
 }
 
 _LABEL_INDEX: dict[str, str] = {}

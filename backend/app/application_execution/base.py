@@ -76,7 +76,10 @@ KNOWN = "KNOWN"
 UNKNOWN = "UNKNOWN"
 REQUIRES_REVIEW = "REQUIRES_REVIEW"
 
-FIELD_KINDS = ("text", "textarea", "select", "radio", "checkbox", "file", "date")
+FIELD_KINDS = (
+    "text", "textarea", "select", "radio", "checkbox", "file", "date",
+    "multi_select", "currency", "autocomplete",
+)
 
 LOGGED_IN_STATUSES = ("applied", "submitted", "interviewing", "offered", "rejected", "withdrawn")
 
@@ -159,7 +162,7 @@ class DetectedField:
 
     key: str = ""  # stable id (label normalized or element id)
     label: str = ""
-    kind: str = "text"  # text | textarea | select | radio | checkbox | file | date
+    kind: str = "text"  # text | textarea | select | radio | checkbox | file | date | multi_select | currency | autocomplete
     required: bool = False
     options: list[str] = field(default_factory=list)  # normalized option labels
     # KNOWN | UNKNOWN | REQUIRES_REVIEW  (set by the mapper)
@@ -167,15 +170,25 @@ class DetectedField:
     value: str | None = None
     matched_key: str | None = None  # canonical field key e.g. "first_name"
     ambiguity: str | None = field(default=None)  # why we stopped, if any
+    # Advanced field metadata
+    multiple: bool = False  # for multi-select / file fields
+    min_value: float | None = None  # for currency / date range
+    max_value: float | None = None  # for currency / date range
+    pattern: str | None = None  # input pattern hint (e.g. date format)
+    accepted_types: list[str] = field(default_factory=list)  # for file fields: ["resume", "cover_letter"]
 
 
 @dataclass
 class FillResult:
     key: str = ""
     label: str = ""
-    status: str = UNKNOWN  # KNOWN | REQUIRES_REVIEW | UNKNOWN
+    status: str = UNKNOWN  # KNOWN | REQUIRES_REVIEW | UNKNOWN | SKIPPED
     value: str | None = None
     message: str = ""
+    # Advanced field metadata
+    control_type: str | None = None  # the control kind that was filled
+    normalized_value: str | None = None  # value after normalization
+    verification_state: str | None = None  # for checkbox/radio: checked/unchecked
 
 
 @dataclass

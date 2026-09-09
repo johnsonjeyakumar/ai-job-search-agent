@@ -388,10 +388,135 @@ FILE_FIELDS = [
         category=CATEGORY_FILES,
         aliases=[
             "portfolio file", "work sample", "portfolio upload",
-            "upload portfolio", "attachment",
+            "upload portfolio", "attachment", "supporting documents",
         ],
         input_types=("file",),
         description="Portfolio/work sample file",
+    ),
+    FieldConcept(
+        canonical="CERTIFICATE_FILE",
+        category=CATEGORY_FILES,
+        aliases=[
+            "certificate", "certification", "credential",
+            "upload certificate", "attach certificate",
+        ],
+        input_types=("file",),
+        description="Certificate/credential file upload",
+    ),
+]
+
+# ---------------------------------------------------------------------------
+# Advanced control fields (Phase 16)
+# ---------------------------------------------------------------------------
+ADVANCED_CONTROL_FIELDS = [
+    FieldConcept(
+        canonical="TERMS_ACCEPTANCE",
+        category=CATEGORY_APPLICATION,
+        aliases=[
+            "terms", "terms and conditions", "i agree to the terms",
+            "terms of service", "terms of use",
+        ],
+        input_types=("checkbox",),
+        description="Terms and conditions acceptance checkbox",
+    ),
+    FieldConcept(
+        canonical="DATA_CONSENT",
+        category=CATEGORY_APPLICATION,
+        aliases=[
+            "consent", "data consent", "i consent",
+            "data processing consent", "privacy consent",
+        ],
+        input_types=("checkbox",),
+        description="Data processing consent checkbox",
+    ),
+    FieldConcept(
+        canonical="EMPLOYMENT_TYPE",
+        category=CATEGORY_WORK,
+        aliases=[
+            "employment type", "job type", "position type",
+            "work type", "employment status",
+        ],
+        input_types=("select", "radio"),
+        description="Employment type (full-time, part-time, contract)",
+    ),
+    FieldConcept(
+        canonical="WORK_PREFERENCE",
+        category=CATEGORY_WORK,
+        aliases=[
+            "work preference", "work mode", "work location",
+            "remote preference", "hybrid", "on-site",
+        ],
+        input_types=("select", "radio"),
+        description="Work location preference (remote, hybrid, on-site)",
+    ),
+    FieldConcept(
+        canonical="SKILLS_MULTI",
+        category=CATEGORY_WORK,
+        aliases=[
+            "skills", "skill set", "technical skills",
+            "key skills", "preferred technologies",
+        ],
+        input_types=("multi_select", "text"),
+        description="Skills (multi-select)",
+    ),
+    FieldConcept(
+        canonical="AVAILABILITY_DATE",
+        category=CATEGORY_APPLICATION,
+        aliases=[
+            "availability date", "start date", "available from",
+            "earliest start date", "when can you start",
+        ],
+        input_types=("date", "text"),
+        description="Availability/start date",
+    ),
+    FieldConcept(
+        canonical="GRADUATION_DATE",
+        category=CATEGORY_EDUCATION,
+        aliases=[
+            "graduation date", "date of graduation", "graduation",
+            "when did you graduate",
+        ],
+        input_types=("date", "text"),
+        description="Graduation date",
+    ),
+    FieldConcept(
+        canonical="EXPECTED_SALARY",
+        category=CATEGORY_WORK,
+        aliases=[
+            "expected salary", "desired compensation", "salary expectation",
+            "expected ctc", "compensation", "annual salary",
+        ],
+        sensitivity=SENSITIVITY_MEDIUM,
+        input_types=("currency", "text"),
+        description="Expected salary/compensation",
+    ),
+    FieldConcept(
+        canonical="CITY_LOCATION",
+        category=CATEGORY_PERSONAL,
+        aliases=[
+            "city", "current city", "location", "city/location",
+        ],
+        input_types=("autocomplete", "text", "select"),
+        description="City/location (autocomplete)",
+    ),
+    FieldConcept(
+        canonical="UNIVERSITY_LOCATION",
+        category=CATEGORY_EDUCATION,
+        aliases=[
+            "university", "college", "institution",
+        ],
+        input_types=("autocomplete", "text", "select"),
+        description="University/institution (autocomplete)",
+    ),
+    FieldConcept(
+        canonical="COMPANY_NAME",
+        category=CATEGORY_WORK,
+        aliases=[
+            "company", "current company", "company name",
+            "employer", "employer name",
+        ],
+        input_types=("autocomplete", "text"),
+        description="Company name (autocomplete)",
     ),
 ]
 
@@ -405,6 +530,7 @@ ALL_FIELD_CONCEPTS: list[FieldConcept] = (
     + AUTHORIZATION_FIELDS
     + APPLICATION_FIELDS
     + FILE_FIELDS
+    + ADVANCED_CONTROL_FIELDS
 )
 
 # Index: canonical -> concept

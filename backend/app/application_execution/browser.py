@@ -40,8 +40,42 @@ def _select(key, label, options, required=False):
     )
 
 
-def _file(key, label, required=False):
-    return DetectedField(key=key, label=label, kind="file", required=required)
+def _file(key, label, required=False, accepted_types=None):
+    return DetectedField(
+        key=key, label=label, kind="file", required=required,
+        accepted_types=accepted_types or [],
+    )
+
+
+def _checkbox(key, label, required=False):
+    return DetectedField(key=key, label=label, kind="checkbox", required=required)
+
+
+def _radio(key, label, options, required=False):
+    return DetectedField(
+        key=key, label=label, kind="radio", required=required, options=options
+    )
+
+
+def _multi_select(key, label, options, required=False):
+    return DetectedField(
+        key=key, label=label, kind="multi_select", required=required,
+        options=options, multiple=True,
+    )
+
+
+def _date(key, label, required=False, pattern=None):
+    return DetectedField(
+        key=key, label=label, kind="date", required=required, pattern=pattern,
+    )
+
+
+def _currency(key, label, required=False):
+    return DetectedField(key=key, label=label, kind="currency", required=required)
+
+
+def _autocomplete(key, label, required=False):
+    return DetectedField(key=key, label=label, kind="autocomplete", required=required)
 
 
 _COMPONENT = "__resume__"
@@ -95,6 +129,79 @@ SCENARIOS: dict[str, list[DetectedField]] = {
     "auth-failed": [],  # auth failure page
     "auth-session-expired": [],  # session expired page
     "auth-unknown": list(_BASE_FIELDS),
+    # Phase 16: advanced form controls
+    "advanced-checkbox": list(_BASE_FIELDS)
+    + [
+        _checkbox("cb1", "I agree to the Terms and Conditions", required=True),
+        _checkbox("cb2", "I consent to data processing"),
+        _checkbox("cb3", "Willing to relocate", required=True),
+    ],
+    "advanced-radio": list(_BASE_FIELDS)
+    + [
+        _radio("r1", "Employment Type", ["Full-time", "Part-time", "Contract", "Internship"], required=True),
+        _radio("r2", "Work Preference", ["Remote", "Hybrid", "On-site"]),
+        _radio("r3", "Visa Sponsorship", ["Yes", "No"], required=True),
+    ],
+    "advanced-multi-select": list(_BASE_FIELDS)
+    + [
+        _multi_select("ms1", "Skills", ["Python", "JavaScript", "React", "Node.js", "SQL", "AWS", "Docker"], required=True),
+        _multi_select("ms2", "Preferred Technologies", ["TypeScript", "Go", "Rust", "Kotlin"]),
+    ],
+    "advanced-date": list(_BASE_FIELDS)
+    + [
+        _date("dt1", "Availability Date", required=True, pattern="YYYY-MM-DD"),
+        _date("dt2", "Start Date"),
+        _date("dt3", "Graduation Date"),
+    ],
+    "advanced-currency": list(_BASE_FIELDS)
+    + [
+        _currency("cu1", "Expected Salary", required=True),
+        _currency("cu2", "Current CTC"),
+    ],
+    "advanced-autocomplete": list(_BASE_FIELDS)
+    + [
+        _autocomplete("ac1", "City", required=True),
+        _autocomplete("ac2", "University"),
+        _autocomplete("ac3", "Current Company"),
+    ],
+    "advanced-file-required": list(_BASE_FIELDS)
+    + [
+        _file("fr1", "Upload Resume", required=True, accepted_types=["resume"]),
+    ],
+    "advanced-file-optional": list(_BASE_FIELDS)
+    + [
+        _file("fr1", "Upload Resume", required=True, accepted_types=["resume"]),
+        _file("fr2", "Cover Letter", required=False, accepted_types=["cover_letter"]),
+    ],
+    "advanced-file-multiple": list(_BASE_FIELDS)
+    + [
+        _file("fm1", "Upload Resume", required=True, accepted_types=["resume"]),
+        _file("fm2", "Cover Letter", required=False, accepted_types=["cover_letter"]),
+        _file("fm3", "Portfolio", required=False, accepted_types=["portfolio"]),
+    ],
+    "advanced-file-invalid": list(_BASE_FIELDS)
+    + [
+        _file("fi1", "Upload Resume", required=True, accepted_types=["resume"]),
+    ],
+    "advanced-file-missing": list(_BASE_FIELDS)
+    + [
+        _file("fm1", "Upload Resume", required=True, accepted_types=["resume"]),
+    ],
+    "advanced-file-ambiguous": list(_BASE_FIELDS)
+    + [
+        _file("fa1", "Supporting Documents", required=False, accepted_types=["resume", "cover_letter", "certificate"]),
+    ],
+    "advanced-mixed": list(_BASE_FIELDS)
+    + [
+        _checkbox("cb1", "I agree to the Terms", required=True),
+        _radio("r1", "Employment Type", ["Full-time", "Part-time", "Contract"], required=True),
+        _multi_select("ms1", "Skills", ["Python", "JavaScript", "React"], required=True),
+        _date("dt1", "Availability Date", required=True),
+        _currency("cu1", "Expected Salary", required=True),
+        _autocomplete("ac1", "City", required=True),
+        _file("fr1", "Upload Resume", required=True, accepted_types=["resume"]),
+    ],
+    "advanced-multi-page-mixed": list(_BASE_FIELDS),
 }
 
 
@@ -154,23 +261,54 @@ class MockBrowserDriver:
         return FillResult(key=target_key, status="KNOWN", value=value, message="Filled.")
 
     def upload_resume(self, data: bytes, file_name: str, content_type: str) -> FillResult:
+        return self.upload_file(data, file_name, content_type, "resume")
+
+    def upload_file(
+        self, data: bytes, file_name: str, content_type: str, document_type: str = "resume",
+    ) -> FillResult:
+        """Upload a file to a file input field.  Validates extension and content."""
         if not self.opened:
             return FillResult(status="UNKNOWN", message="Page not opened.")
         ext_ok = bool(_FILE_EXT_RE.search(file_name or "")) or content_type == "application/pdf"
         if not data:
-            return FillResult(status="UNKNOWN", message="Resume file is empty.")
+            return FillResult(status="UNKNOWN", message="File is empty.")
         if not ext_ok:
             return FillResult(
                 status="REQUIRES_REVIEW",
-                message=f"Resume type '{file_name}' is not an acceptable application file.",
+                message=f"File type '{file_name}' is not an acceptable application file.",
+            )
+        # Simulate rejection for invalid/scenario-specific files
+        if self.scenario == "advanced-file-invalid" and file_name.lower().endswith(".exe"):
+            return FillResult(
+                status="REQUIRES_REVIEW",
+                message=f"File '{file_name}' has an invalid extension for upload.",
+            )
+        if self.scenario == "advanced-file-missing" and not data:
+            return FillResult(
+                status="UNKNOWN",
+                message="No file provided for required upload.",
             )
         self.uploaded = (file_name, content_type)
         return FillResult(
-            key="__resume__",
+            key=f"__{document_type}__",
             status="KNOWN",
             value=file_name,
-            message=f"Uploaded {file_name} ({content_type}).",
+            message=f"Uploaded {file_name} ({content_type}) as {document_type}.",
+            control_type="file",
         )
+
+    def get_autocomplete_suggestions(self, field_key: str, query: str) -> list[str]:
+        """Return scripted autocomplete suggestions for a field."""
+        _SUGGESTIONS: dict[str, list[str]] = {
+            "ac1": ["San Francisco", "New York", "Seattle", "Austin", "Boston", "Chicago"],
+            "ac2": ["MIT", "Stanford", "UC Berkeley", "Carnegie Mellon", "Georgia Tech"],
+            "ac3": ["Google", "Microsoft", "Amazon", "Apple", "Meta", "Startup Inc"],
+        }
+        suggestions = _SUGGESTIONS.get(field_key, [])
+        if not query:
+            return suggestions
+        q = query.lower()
+        return [s for s in suggestions if q in s.lower()]
 
     def detect_captcha(self) -> bool:
         return self.scenario == "captcha"

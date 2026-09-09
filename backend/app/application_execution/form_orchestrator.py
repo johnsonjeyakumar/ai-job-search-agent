@@ -1,14 +1,21 @@
-"""Multi-step form orchestration engine (Phase 14).
+"""Multi-step form orchestration engine (Phase 14 + Phase 17).
 
 Extends the Phase 12 execution engine to handle multi-page application
 forms. Orchestrates the cycle: INSPECT -> MAP -> FILL -> VALIDATE ->
 NAVIGATE -> CHECKPOINT -> INSPECT NEXT -> ... -> REVIEW -> SUBMIT.
 
+Phase 17 adds:
+- Advanced field normalization (date, currency, multi-select, checkbox, radio, autocomplete)
+- Safe file upload with validation chain
+- Evidence recording for all actions
+- Human approval integration
+- Conditional field detection and re-mapping
+
 Safety:
 - One navigation click per transition (idempotent)
 - Checkpoint after every page completion
 - Dynamic field detection after interactions
-- Never blindly click "continue" — verify it's real navigation
+- Never blindly click "continue" -- verify it's real navigation
 - Never interpret navigation as submission
 - Browser state is source of truth; checkpoints are recovery metadata
 """
@@ -155,6 +162,7 @@ def fill_page_fields(
 ) -> list[FillResult]:
     """Fill all KNOWN fields on the current page.
 
+    Phase 17: Normalizes values based on field kind before filling.
     Returns fill results for each attempted field.
     """
     snapshot = session.get_current_page()
@@ -173,9 +181,24 @@ def fill_page_fields(
         if tracked is None or not tracked.visible:
             continue
 
+        # Skip file fields here -- handled separately
+        if mapped.detected.kind == "file":
+            continue
+
+        # Phase 17: normalize value before filling
+        normalized_value, norm_error = normalize_field_value(mapped, mapped.detected)
+        if norm_error:
+            results.append(FillResult(
+                status=UNKNOWN,
+                value=None,
+                error=norm_error,
+                control_type=mapped.detected.kind,
+            ))
+            continue
+
         try:
-            fill_result = driver.fill(mapped.detected.key, mapped.value)
-            tracked.value = mapped.value
+            fill_result = driver.fill(mapped.detected.key, normalized_value or mapped.value)
+            tracked.value = normalized_value or mapped.value
             tracked.state = FieldState.FILLED
             results.append(fill_result)
         except Exception as e:
@@ -467,3 +490,261 @@ def run_multi_step_orchestration(
 
     result.status = session.status
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 17: Advanced field normalization
+# ---------------------------------------------------------------------------
+
+def normalize_field_value(
+    mapped,
+    raw_field: DetectedField,
+) -> tuple[str | None, str | None]:
+    """Normalize a mapped value based on field kind.
+
+    Returns (normalized_value, error_or_none).
+    """
+    if not mapped.value or mapped.classification != KNOWN:
+        return mapped.value, None
+
+    kind = raw_field.kind
+
+    if kind == "date":
+        from app.application_execution.normalizer import normalize_date
+        normalized = normalize_date(mapped.value)
+        if normalized is None:
+            return None, f"Date value '{mapped.value}' could not be normalized."
+        return normalized, None
+
+    if kind == "currency":
+        from app.application_execution.normalizer import normalize_currency
+        amount, code = normalize_currency(mapped.value)
+        if amount is None:
+            return None, f"Currency value '{mapped.value}' could not be normalized."
+        return str(amount), None
+
+    if kind == "multi_select":
+        if raw_field.options and mapped.value:
+            from app.application_execution.normalizer import normalize_multi_select
+            requested = [s.strip() for s in mapped.value.split(",")]
+            matched, unmatched = normalize_multi_select(requested, raw_field.options)
+            if unmatched:
+                return None, f"Unmatched options: {', '.join(unmatched)}"
+            return ", ".join(matched), None
+        return mapped.value, None
+
+    if kind == "checkbox":
+        from app.application_execution.normalizer import normalize_checkbox_value
+        result = normalize_checkbox_value(mapped.value)
+        if result is None:
+            return None, f"Checkbox value '{mapped.value}' is not a valid boolean."
+        return str(result).lower(), None
+
+    if kind == "radio":
+        if raw_field.options:
+            from app.application_execution.normalizer import normalize_radio_value
+            result = normalize_radio_value(mapped.value, raw_field.options)
+            if result is None:
+                return None, (
+                    f"Radio value '{mapped.value}' is not among options: "
+                    f"{', '.join(raw_field.options)}"
+                )
+            return result, None
+        return mapped.value, None
+
+    if kind == "autocomplete":
+        from app.application_execution.normalizer import normalize_autocomplete_input
+        return normalize_autocomplete_input(mapped.value), None
+
+    return mapped.value, None
+
+
+# ---------------------------------------------------------------------------
+# Phase 17: File upload handling
+# ---------------------------------------------------------------------------
+
+def resolve_file_for_upload(
+    field: DetectedField,
+    *,
+    resume=None,
+    package_id: int | None = None,
+) -> tuple[bytes | None, str | None, str | None, str | None, str | None]:
+    """Resolve the file bytes, filename, content_type, document_type, and error.
+
+    Returns (data, file_name, content_type, document_type, error).
+    """
+    from app.application_execution.file_handler import detect_document_type_from_label
+
+    document_type = detect_document_type_from_label(field.label or "")
+
+    # Only resume is auto-resolved from the package
+    if document_type != "resume" or resume is None:
+        return None, None, None, document_type, None
+
+    # Resolve bytes from storage
+    try:
+        from app.storage.local import get_storage
+        data = get_storage().load(resume.file_path)
+    except (OSError, ValueError):
+        return None, resume.file_name, resume.content_type, document_type, (
+            f"Resume file '{resume.file_name}' could not be loaded from storage."
+        )
+
+    return (
+        data,
+        resume.file_name,
+        resume.content_type or "application/pdf",
+        document_type,
+        None,
+    )
+
+
+def validate_and_upload_file(
+    driver,
+    data: bytes,
+    file_name: str,
+    content_type: str,
+    document_type: str,
+    *,
+    package_id: int | None = None,
+) -> tuple[FillResult, str | None]:
+    """Validate file via the full chain, then upload.
+
+    Returns (result, error_or_none).
+    """
+    from app.application_execution.file_handler import (
+        validate_file_for_upload,
+    )
+
+    size = len(data) if data else 0
+    validation = validate_file_for_upload(
+        file_path=None,
+        content_type=content_type,
+        document_type=document_type,
+        size_bytes=size,
+    )
+
+    if validation.status != "VALID":
+        return FillResult(
+            status="REQUIRES_REVIEW",
+            message=f"File validation failed: {validation.status} - {validation.message}",
+            control_type="file",
+        ), f"File validation failed: {validation.status}"
+
+    # Upload via driver
+    result = driver.upload_file(data, file_name, content_type, document_type)
+    return result, None
+
+
+# ---------------------------------------------------------------------------
+# Phase 17: Evidence recording helpers
+# ---------------------------------------------------------------------------
+
+def record_fill_evidence(
+    evidence_store,
+    run_id: str,
+    step: int,
+    field_label: str,
+    canonical: str | None,
+    value: str | None,
+    kind: str,
+    *,
+    success: bool = True,
+    error: str | None = None,
+    page_url: str | None = None,
+):
+    """Record evidence for a field fill action."""
+    from app.application_execution.evidence_tracker import record_advanced_field_fill
+
+    record_advanced_field_fill(
+        evidence_store,
+        run_id,
+        step,
+        field_label,
+        canonical or "",
+        kind,
+        value or "",
+        page_identifier=page_url,
+    )
+
+
+def record_file_evidence(
+    evidence_store,
+    run_id: str,
+    step: int,
+    field_label: str,
+    document_type: str,
+    file_name: str,
+    content_type: str,
+    success: bool,
+    *,
+    validation_result: str | None = None,
+    error: str | None = None,
+):
+    """Record evidence for a file upload action."""
+    from app.application_execution.evidence_tracker import record_file_upload
+
+    record_file_upload(
+        evidence_store,
+        run_id,
+        step,
+        field_label,
+        document_type,
+        file_name,
+        content_type,
+        success,
+        validation_result=validation_result,
+        error_message=error,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 17: Approval request helpers
+# ---------------------------------------------------------------------------
+
+def maybe_request_file_approval(
+    approval_store,
+    run_id: str,
+    field_label: str,
+    document_type: str,
+    *,
+    is_ambiguous: bool = False,
+    is_sensitive: bool = False,
+    accepted_types: list[str] | None = None,
+) -> str | None:
+    """Create approval request for file upload if needed.
+
+    Returns action taken or None if no approval needed.
+    """
+    from app.application_execution.human_approval import ApprovalAction, check_approval_needed
+
+    if is_ambiguous:
+        action = ApprovalAction.AMBIGUOUS_DOCUMENT_SELECTION
+        needs, reason = check_approval_needed(action.value, sensitivity="HIGH")
+        if needs:
+            approval_store.request_approval(
+                run_id, action.value,
+                details={
+                    "field_label": field_label,
+                    "document_type": document_type,
+                    "accepted_types": accepted_types or [],
+                },
+                reason=reason,
+            )
+            return action.value
+
+    if is_sensitive or document_type not in ("resume", "cover_letter"):
+        action = ApprovalAction.UPLOAD_FILE
+        needs, reason = check_approval_needed(action.value, sensitivity="MEDIUM")
+        if needs:
+            approval_store.request_approval(
+                run_id, action.value,
+                details={
+                    "field_label": field_label,
+                    "document_type": document_type,
+                },
+                reason=reason,
+            )
+            return action.value
+
+    return None

@@ -27,6 +27,17 @@ EVIDENCE_ERROR = "ERROR"
 EVIDENCE_RECOVERY = "RECOVERY"
 EVIDENCE_CHECKPOINT = "CHECKPOINT"
 EVIDENCE_MAPPING = "FIELD_MAPPING"
+# Phase 16: file upload and advanced control evidence
+EVIDENCE_FILE_UPLOADED = "FILE_UPLOADED"
+EVIDENCE_FILE_UPLOAD_FAILED = "FILE_UPLOAD_FAILED"
+EVIDENCE_FILE_VALIDATED = "FILE_VALIDATED"
+EVIDENCE_FILE_VALIDATION_FAILED = "FILE_VALIDATION_FAILED"
+EVIDENCE_CHECKBOX_TOGGLED = "CHECKBOX_TOGGLED"
+EVIDENCE_RADIO_SELECTED = "RADIO_SELECTED"
+EVIDENCE_MULTI_SELECT_CHANGED = "MULTI_SELECT_CHANGED"
+EVIDENCE_AUTOCOMPLETE_SELECTED = "AUTOCOMPLETE_SELECTED"
+EVIDENCE_DATE_FILLED = "DATE_FILLED"
+EVIDENCE_CURRENCY_FILLED = "CURRENCY_FILLED"
 
 
 @dataclass
@@ -50,6 +61,13 @@ class EvidenceRecord:
     error_message: str | None = None
     metadata: dict = field(default_factory=dict)
     data_hash: str = ""
+    # Phase 16: advanced field metadata
+    control_type: str | None = None  # text | select | radio | checkbox | file | date | multi_select | currency | autocomplete
+    document_type: str | None = None  # for file uploads: resume | cover_letter | etc.
+    uploaded_filename: str | None = None  # for file uploads
+    validation_result: str | None = None  # for file uploads: VALID | INVALID | etc.
+    verification_result: str | None = None  # for file uploads: CONFIRMED | FAILED | etc.
+    page_identifier: str | None = None  # page URL or identifier
 
     def __post_init__(self):
         if not self.timestamp:
@@ -260,5 +278,115 @@ def record_error(
         field_label=field_label,
         success=False,
         error_message=error_message,
+    )
+    return store.record(evidence)
+
+
+# ---------------------------------------------------------------------------
+# Phase 16: file upload and advanced control evidence helpers
+# ---------------------------------------------------------------------------
+
+
+def record_file_upload(
+    store: EvidenceStore,
+    run_id: str,
+    step: int,
+    field_label: str,
+    document_type: str,
+    filename: str,
+    content_type: str,
+    success: bool,
+    validation_result: str = "VALID",
+    verification_result: str | None = None,
+    error_message: str | None = None,
+    page_identifier: str | None = None,
+) -> EvidenceRecord:
+    """Record evidence of a file upload attempt."""
+    evidence_type = EVIDENCE_FILE_UPLOADED if success else EVIDENCE_FILE_UPLOAD_FAILED
+    evidence = EvidenceRecord(
+        run_id=run_id,
+        evidence_type=evidence_type,
+        step_number=step,
+        field_label=field_label,
+        after_value=filename,
+        source="package",
+        success=success,
+        error_message=error_message,
+        control_type="file",
+        document_type=document_type,
+        uploaded_filename=filename,
+        validation_result=validation_result,
+        verification_result=verification_result,
+        page_identifier=page_identifier,
+        metadata={"content_type": content_type},
+    )
+    return store.record(evidence)
+
+
+def record_file_validation(
+    store: EvidenceStore,
+    run_id: str,
+    step: int,
+    field_label: str,
+    document_type: str,
+    filename: str,
+    validation_result: str,
+    error_message: str | None = None,
+) -> EvidenceRecord:
+    """Record evidence of file validation."""
+    evidence_type = (
+        EVIDENCE_FILE_VALIDATED if validation_result == "VALID"
+        else EVIDENCE_FILE_VALIDATION_FAILED
+    )
+    evidence = EvidenceRecord(
+        run_id=run_id,
+        evidence_type=evidence_type,
+        step_number=step,
+        field_label=field_label,
+        control_type="file",
+        document_type=document_type,
+        uploaded_filename=filename,
+        validation_result=validation_result,
+        success=validation_result == "VALID",
+        error_message=error_message,
+    )
+    return store.record(evidence)
+
+
+def record_advanced_field_fill(
+    store: EvidenceStore,
+    run_id: str,
+    step: int,
+    field_label: str,
+    canonical_name: str,
+    control_type: str,
+    value: str,
+    before_value: str | None = None,
+    source: str = "profile",
+    success: bool = True,
+    page_identifier: str | None = None,
+) -> EvidenceRecord:
+    """Record evidence of an advanced field fill (checkbox, radio, multi-select, etc.)."""
+    _TYPE_MAP = {
+        "checkbox": EVIDENCE_CHECKBOX_TOGGLED,
+        "radio": EVIDENCE_RADIO_SELECTED,
+        "multi_select": EVIDENCE_MULTI_SELECT_CHANGED,
+        "autocomplete": EVIDENCE_AUTOCOMPLETE_SELECTED,
+        "date": EVIDENCE_DATE_FILLED,
+        "currency": EVIDENCE_CURRENCY_FILLED,
+    }
+    evidence_type = _TYPE_MAP.get(control_type, EVIDENCE_FIELD_FILLED)
+    evidence = EvidenceRecord(
+        run_id=run_id,
+        evidence_type=evidence_type,
+        step_number=step,
+        field_label=field_label,
+        canonical_name=canonical_name,
+        before_value=before_value,
+        after_value=value,
+        source=source,
+        success=success,
+        control_type=control_type,
+        page_identifier=page_identifier,
     )
     return store.record(evidence)
