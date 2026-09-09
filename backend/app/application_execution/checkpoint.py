@@ -27,6 +27,24 @@ class CheckpointType(str, Enum):
     SUBMISSION_FAILED = "SUBMISSION_FAILED"
     ERROR_RECOVERED = "ERROR_RECOVERED"
     ABORTED = "ABORTED"
+    # Page-level checkpoints (Phase 14)
+    PAGE_INSPECTED = "PAGE_INSPECTED"
+    PAGE_READY = "PAGE_READY"
+    PAGE_VALIDATED = "PAGE_VALIDATED"
+    NAVIGATION_COMPLETED = "NAVIGATION_COMPLETED"
+    DYNAMIC_FIELDS_DETECTED = "DYNAMIC_FIELDS_DETECTED"
+    REVIEW_PAGE_REACHED = "REVIEW_PAGE_REACHED"
+    READY_TO_SUBMIT = "READY_TO_SUBMIT"
+    # Authentication checkpoints (Phase 15)
+    AUTH_CHECKED = "AUTH_CHECKED"
+    LOGIN_REQUIRED = "LOGIN_REQUIRED"
+    LOGIN_COMPLETED = "LOGIN_COMPLETED"
+    MFA_REQUIRED = "MFA_REQUIRED"
+    MFA_COMPLETED = "MFA_COMPLETED"
+    SESSION_EXPIRED = "SESSION_EXPIRED"
+    SESSION_RESTORED = "SESSION_RESTORED"
+    AUTH_FAILED = "AUTH_FAILED"
+    DOMAIN_VALIDATED = "DOMAIN_VALIDATED"
 
 
 @dataclass
@@ -279,4 +297,176 @@ def create_error_checkpoint(
         step_number=step,
         errors=[error],
         recovered=recovered,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 15: Authentication checkpoint helpers
+# ---------------------------------------------------------------------------
+
+def create_auth_checked_checkpoint(
+    run_id: str,
+    step: int,
+    auth_state: str,
+    reason: str,
+    confidence: float,
+    domain: str | None = None,
+) -> Checkpoint:
+    """Create a checkpoint after authentication state check."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.AUTH_CHECKED,
+        step_number=step,
+        state_snapshot={
+            "auth_state": auth_state,
+            "reason": reason,
+            "confidence": confidence,
+            "domain": domain,
+        },
+    )
+
+
+def create_login_required_checkpoint(
+    run_id: str,
+    step: int,
+    login_type: str,
+    reason: str,
+    page_url: str | None = None,
+) -> Checkpoint:
+    """Create a checkpoint when login is required."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.LOGIN_REQUIRED,
+        step_number=step,
+        state_snapshot={
+            "login_type": login_type,
+            "reason": reason,
+            "page_url": page_url,
+        },
+    )
+
+
+def create_login_completed_checkpoint(
+    run_id: str,
+    step: int,
+    domain: str | None = None,
+) -> Checkpoint:
+    """Create a checkpoint after login is completed."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.LOGIN_COMPLETED,
+        step_number=step,
+        state_snapshot={
+            "domain": domain,
+        },
+    )
+
+
+def create_mfa_required_checkpoint(
+    run_id: str,
+    step: int,
+    mfa_type: str,
+    reason: str,
+    page_url: str | None = None,
+) -> Checkpoint:
+    """Create a checkpoint when MFA/2FA is required."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.MFA_REQUIRED,
+        step_number=step,
+        state_snapshot={
+            "mfa_type": mfa_type,
+            "reason": reason,
+            "page_url": page_url,
+        },
+    )
+
+
+def create_session_expired_checkpoint(
+    run_id: str,
+    step: int,
+    reason: str,
+    page_url: str | None = None,
+) -> Checkpoint:
+    """Create a checkpoint when session expires."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.SESSION_EXPIRED,
+        step_number=step,
+        state_snapshot={
+            "reason": reason,
+            "page_url": page_url,
+        },
+    )
+
+
+def create_session_restored_checkpoint(
+    run_id: str,
+    step: int,
+    domain: str | None = None,
+    restored_from: str | None = None,
+) -> Checkpoint:
+    """Create a checkpoint after session is restored."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.SESSION_RESTORED,
+        step_number=step,
+        state_snapshot={
+            "domain": domain,
+            "restored_from": restored_from,
+        },
+    )
+
+
+def create_auth_failed_checkpoint(
+    run_id: str,
+    step: int,
+    reason: str,
+    page_url: str | None = None,
+) -> Checkpoint:
+    """Create a checkpoint when authentication fails."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.AUTH_FAILED,
+        step_number=step,
+        state_snapshot={
+            "reason": reason,
+            "page_url": page_url,
+        },
+    )
+
+
+def create_domain_validated_checkpoint(
+    run_id: str,
+    step: int,
+    expected_domain: str,
+    actual_domain: str,
+    is_match: bool,
+) -> Checkpoint:
+    """Create a checkpoint after domain validation."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.DOMAIN_VALIDATED,
+        step_number=step,
+        state_snapshot={
+            "expected_domain": expected_domain,
+            "actual_domain": actual_domain,
+            "is_match": is_match,
+        },
+    )
+
+
+def create_captcha_detected_checkpoint(
+    run_id: str,
+    step: int,
+    reason: str,
+) -> Checkpoint:
+    """Create a checkpoint when CAPTCHA is detected."""
+    return Checkpoint(
+        run_id=run_id,
+        checkpoint_type=CheckpointType.CAPTCHA_DETECTED,
+        step_number=step,
+        state_snapshot={
+            "reason": reason,
+        },
     )

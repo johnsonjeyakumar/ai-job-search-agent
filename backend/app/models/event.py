@@ -18,7 +18,7 @@ class JobEvent(Base):
         ForeignKey("jobs.id", ondelete="CASCADE"), index=True
     )
     event_type: Mapped[str] = mapped_column(String(50), index=True)
-    event_data: Mapped[dict] = mapped_column(JSONB, default=dict)
+    event_data: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

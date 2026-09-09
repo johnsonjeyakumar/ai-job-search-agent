@@ -95,7 +95,7 @@ class FollowUp(Base):
     action_type: Mapped[str] = mapped_column(String(100))
     # PENDING | COMPLETED | CANCELLED | SKIPPED (SCHEDULED/DUE/OVERDUE/
     # RESCHEDULED are derived at read time from the event history + dates).
-    status: Mapped[str] = mapped_column(String(30), default="pending")
+    status: Mapped[str] = mapped_column(String(50), default="pending")
     # Phase 9 follow-up engineering: deterministic priority / reason / trigger.
     # priority: HIGH | MEDIUM | LOW
     priority: Mapped[str | None] = mapped_column(String(10))

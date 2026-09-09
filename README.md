@@ -1,13 +1,17 @@
 # Job Search & Application Agent
 
-A personal, **local-first** job search and application system: discovers jobs via
-Apify, scores them with a transparent deterministic-first engine, prepares a
-tailored application package, and runs a **safe, human-gated application execution**
-workflow against the platform where the job lives.
+A personal, **local-first** automatic job application agent: discovers jobs,
+scores them, prepares tailored application packages, and executes safe,
+human-gated application workflows against the platforms where jobs live.
 
-**Current status:** Phases 1–9 implemented and verified. No automatic
-mass-application, and nothing is ever submitted without an explicit, per-package
-human approval. Follow-ups and analytics are deterministic and evidence-only.
+**Primary product:** Automatic Job Application Agent
+
+**Supporting features:** Interview preparation, skill gaps, learning, analytics,
+follow-ups — secondary and minimal priority.
+
+**Current status:** Phases 1–13 complete. Core application automation verified.
+No automatic mass-application, and nothing is ever submitted without explicit
+human approval.
 
 ## Implemented phases
 
@@ -22,58 +26,45 @@ human approval. Follow-ups and analytics are deterministic and evidence-only.
 | 7 | Platform-Aware Application Execution — detect platform → resolve per-platform policy → fill only known-safe fields → stop at the human approval boundary → record ordered step trail, evidence, and confirmation; mock + Playwright browser drivers; execution UI at `/applications/:id/execute` | ✅ |
 | 8 | Application Tracking — immutable lifecycle + timeline (`/tracking/applications`), follow-up scheduling state, funnel + performance analytics APIs and dashboard widgets | ✅ |
 | 9 | Follow-Up Engine + Analytics — typed priorities/reasons/trigger-keys, skip/restore/cancel/reschedule actions, interview thank-you scheduling; resume performance + recommended resume, source quality (discovery + submission), response-time breakdowns, deterministic insights; `/analytics` page | ✅ |
+| 10 | Interview Preparation — interview workspace, question bank, round management, thank-you notes | ✅ |
+| 11 | Skill Gaps & Learning — skill gap analysis, learning plan generation, resource management, demand signals | ✅ |
+| 12 | Advanced Application Automation Engine — semantic field mapping (31 canonical concepts), application memory with verified answer reuse, question classification and handling, evidence-bound answer generation (never invents facts), 8-stage mapping pipeline, execution checkpointing and resume, browser resilience with bounded retry, human approval boundaries, idempotency for safe retries, execution evidence tracking with SHA-256 integrity, security controls and field classification, 18 API endpoints, 532 tests | ✅ |
+| 12.1 | QA Fixes — answer engine bug fix, ruff cleanup, backend restart, regression verification | ✅ |
+| 13 | Application Queue & Autopilot Orchestration — processing queue with deterministic priority scoring, attention classification (AUTO/ASK/REVIEW/BLOCK), preflight checks, autopilot batch processing, daily limits, 14 API endpoints, frontend queue page, 38 new tests | ✅ |
 
-## Current capabilities
+## Application automation workflow
 
-- Discover remote/on-site software jobs through an Apify Indeed scraper
-  (source-agnostic, deduplicated, logged as automation runs).
-- Score every job with transparent, explainable quality + personal-match +
-  opportunity signals; OPTIONAL/blocked jobs are surfaced with reasons.
-- Prepare a reviewable application package per job (deterministic answers from your
-  profile, tailored cover letter, per-job resume selection, quality gate).
-- Execute approved packages through a platform-aware runner that:
-  - detects the platform and resolves its automation policy,
-  - fills known fields only — never guesses phone/experience/notice-period or any
-    unknown/sensitive field,
-  - stops at `AWAITING_APPROVAL` for a human decision,
-  - either auto-submits after approval (only where the platform policy permits) or
-    stops at `AWAITING_USER` for a manually-completed, honestly-confirmed outcome,
-  - records an ordered step trail, warnings, evidence, confirmation reference/URL,
-    and enforces a configurable daily application budget.
-- Track every application across its lifecycle with an immutable timeline
-  (status moves, responses, interviews, offers, notes), and schedule typed
-  follow-ups (`SUBMISSION_FOLLOW_UP` / `INTERVIEW_THANK_YOU`) with priorities,
-  due-state badges (due/overdue/upcoming/skipped), and skip / restore /
-  reschedule / complete actions.
-- Full analytics page (`/analytics`): funnel, weekly trend, response times +
-  breakdowns, discovery/submission source quality (deterministic formula +
-  bands), resume performance with inferred rank, recommended resume with honest
-  no-data handling, follow-up health, and evidence-only insights.
-- Full dashboard: jobs, companies, recommendations, applications (+ execution),
-  analytics, resumes, recruiters, profile, preferences, settings, logs.
+```
+JOB DISCOVERY
+→ MATCHING
+→ APPLICATION PREPARATION
+→ APPLICATION QUEUE (priority-scored, attention-classified)
+→ AUTOPILOT (batch processing, daily limits)
+→ FORM INSPECTION
+→ FIELD MAPPING (semantic, alias, token, user-verified)
+→ APPLICATION MEMORY (verified answer reuse)
+→ QUESTION HANDLING (classify, detect sensitivity)
+→ ANSWER ENGINE (evidence-bound, never invents)
+→ VALIDATION (required fields, format checks)
+→ HUMAN APPROVAL (required for submission, CAPTCHA, high-sensitivity)
+→ BROWSER EXECUTION (bounded retry, checkpoint recovery)
+→ SUBMISSION
+→ CONFIRMATION (observable state, not just click)
+→ TRACKING (immutable lifecycle, follow-ups)
+```
 
 ## Safety / execution model
 
-- **Human approval gate:** an application package must be APPROVED (Phase 6) and
-  each execution must be explicitly approved before any submission is attempted.
-- **Authorized automation where applicable:** platforms whose resolved policy is
-  `PERMITTED_BROWSER` (e.g. company career sites) may fill known fields
-  automatically and submit only after approval. LinkedIn / Indeed / Naukri default to
-  `HUMAN_ASSISTED` — the engine fills safe fields and stops; the human completes and
-  confirms. Platform modes are configurable live via Preferences.
-- **Human-assisted workflows where required:** any platform (or user override) in
-  `HUMAN_ASSISTED` mode never auto-submits; the outcome is recorded as
-  `CONFIRMED` / `LIKELY` / `UNKNOWN` / `FAILED` by the user, and only explicit
-  evidence marks a submission `SUBMISSION_CONFIRMED`.
-- **No CAPTCHA / anti-bot bypass:** CAPTCHA, login-required, and anti-bot preflight
-  checks stop the run with a **blocked** step — nothing is submitted around them.
-- **No credential bypass:** no passwords or cookies are collected, stored, or used
-  to log in on your behalf.
-- **No mass-apply:** there is deliberately no `apply_everywhere()`. The runner only
-  ever executes the one package you approve, and the daily budget guards repeated
-  submissions.
-- Credentials, tokens, cookies, and persisted browser sessions are never committed
-  (see `.env` / `.gitignore`).
+- **Human approval gate:** every submission requires explicit human approval.
+  CAPTCHA, high-sensitivity fields, and destructive actions always require approval.
+- **Evidence-bound answers:** AI may only reword verified facts. Never invents
+  experience, qualifications, or application answers.
+- **No CAPTCHA / anti-bot bypass:** CAPTCHA detection stops execution.
+- **No credential bypass:** no passwords, cookies, or session data collected or stored.
+- **No mass-apply:** no `apply_everywhere()`. One package at a time, daily budget enforced.
+- **Idempotent execution:** repeated submissions safely detected, no duplicates.
+- **Checkpoint recovery:** interrupted executions resume from last checkpoint.
+- **Bounded retry:** browser resilience with configurable max retry, exponential backoff.
 
 ## Repository layout
 
@@ -82,9 +73,11 @@ backend/    FastAPI + SQLAlchemy + Alembic (Python)
   app/
     api/routes/            HTTP endpoints (health, profile, preferences, resumes,
                            jobs, applications(+execution), tracking, analytics,
-                           companies)
-    application_execution/ Phase 7 execution engine: detector, policy, fields,
-                           browser drivers (mock + Playwright), executor, adapters
+                           companies, execution, queue+autopilot)
+    application_execution/ Advanced automation engine (Phase 12): field catalog,
+                           semantic mapper, memory, question handler, answer engine,
+                           pipeline, checkpoint, resilience, human approval,
+                           evidence tracker, analytics, security
     services/              domain services (discovery, quality, matching,
                            opportunity, preparation, execution, ...)
     models/                SQLAlchemy ORM models
@@ -97,18 +90,18 @@ backend/    FastAPI + SQLAlchemy + Alembic (Python)
     migrations/            Alembic revisions
     tests/                 pytest suite (unit + API + phase tests)
 frontend/   React + Vite + Tailwind (dashboard, onboarding, jobs, companies,
-            recommendations, applications + execution, resumes, profile, settings)
+            recommendations, applications + execution, resumes, profile, settings,
+            skills)
 docs/       Architecture, phase reports, roadmap
 storage/    locally stored resume files (gitignored)
 tests/      test strategy notes (unit tests live in backend/tests)
 ```
 
-See `docs/ARCHITECTURE.md`, `docs/PHASE5.md`, `docs/PHASE7.md`, `docs/PHASE9.md`,
-and `docs/ROADMAP.md` for details.
+See `docs/ARCHITECTURE.md`, `docs/PHASE12.md`, `docs/ROADMAP.md` for details.
 
 ## Local setup
 
-Prerequsites: Python 3.11+, Node.js 20+, and a running **PostgreSQL** server.
+Prerequisites: Python 3.14+, Node.js 20+, and a running **PostgreSQL** server.
 
 ### 1. PostgreSQL
 
@@ -162,14 +155,18 @@ npm run dev                   # http://localhost:5173
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest          # full suite
+.\.venv\Scripts\python.exe -m pytest          # full suite (uses job_agent_test)
 .\.venv\Scripts\python.exe -m ruff check app tests
 cd ..\frontend
 npm run build
 ```
 
-Current gate: **344 backend tests pass**, `ruff check app tests` clean, frontend
+Current gate: **532 backend tests pass**, `ruff check app tests` clean, frontend
 `npm run build` passes.
+
+Tests use a dedicated `job_agent_test` database that is created fresh per session,
+recreated from schema each run, and dropped on exit. Development data in `job_agent`
+is never modified.
 
 ### API docs
 
@@ -177,17 +174,5 @@ Current gate: **344 backend tests pass**, `ruff check app tests` clean, frontend
 - Health: http://localhost:8000/health
 
 ## Roadmap
-
-- **Phase 8 — Application tracking (✅).** Immutable application lifecycle +
-  timeline, follow-up scheduling state, funnel/performance analytics APIs and
-  dashboard widgets.
-- **Phase 9 — Follow-up engine & analytics (✅).** Typed follow-up automation
-  (priorities, reasons, trigger-keys, derived due states, skip/restore,
-  interview thank-yous), resume + source-quality analytics, recommended resume,
-  response-time breakdowns, deterministic insights, `/analytics` page. Recruiter
-  outreach automation is deliberately out of scope.
-- **Phase 10 — Multi-provider & production hardening (planned).** Concrete AI
-  provider, additional Apify/generic job sources, auth, deployment, and
-  real-driver coverage for platforms where automation is explicitly permitted.
 
 See `docs/ROADMAP.md` for the full phase plan.

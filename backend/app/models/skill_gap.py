@@ -52,7 +52,7 @@ class SkillGapAnalysis(Base):
     __tablename__ = "skill_gap_analyses"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    job_id: Mapped[int] = mapped_column(
+    job_id: Mapped[int | None] = mapped_column(
         ForeignKey("jobs.id", ondelete="CASCADE"), index=True
     )
     profile_id: Mapped[int | None] = mapped_column(
@@ -61,17 +61,17 @@ class SkillGapAnalysis(Base):
     resume_id: Mapped[int | None] = mapped_column(
         ForeignKey("resumes.id", ondelete="SET NULL"), index=True
     )
-    matched_skills: Mapped[list] = mapped_column(JSONB, default=list)
-    partial_skills: Mapped[list] = mapped_column(JSONB, default=list)
-    missing_skills: Mapped[list] = mapped_column(JSONB, default=list)
-    unknown_skills: Mapped[list] = mapped_column(JSONB, default=list)
-    evidence: Mapped[list] = mapped_column(JSONB, default=list)
-    priorities: Mapped[dict] = mapped_column(JSONB, default=dict)
-    market_demand: Mapped[dict] = mapped_column(JSONB, default=dict)
-    readiness_label: Mapped[str] = mapped_column(String(50), default="UNKNOWN")
-    readiness_percentage: Mapped[int] = mapped_column(Integer, default=0)
-    readiness_breakdown: Mapped[dict] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(
+    matched_skills: Mapped[list | None] = mapped_column(JSONB, default=list)
+    partial_skills: Mapped[list | None] = mapped_column(JSONB, default=list)
+    missing_skills: Mapped[list | None] = mapped_column(JSONB, default=list)
+    unknown_skills: Mapped[list | None] = mapped_column(JSONB, default=list)
+    evidence: Mapped[list | None] = mapped_column(JSONB, default=list)
+    priorities: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    market_demand: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    readiness_label: Mapped[str | None] = mapped_column(String(50), default="UNKNOWN")
+    readiness_percentage: Mapped[int | None] = mapped_column(Integer, default=0)
+    readiness_breakdown: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -85,20 +85,20 @@ class LearningPlan(Base):
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("jobs.id", ondelete="SET NULL"), index=True
     )
-    profile_id: Mapped[int] = mapped_column(
+    profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("profiles.id", ondelete="CASCADE"), index=True
     )
     target_role: Mapped[str | None] = mapped_column(String(255))
-    title: Mapped[str] = mapped_column(String(500))
-    status: Mapped[str] = mapped_column(String(20), default="NOT_STARTED")
-    total_items: Mapped[int] = mapped_column(Integer, default=0)
-    completed_items: Mapped[int] = mapped_column(Integer, default=0)
-    verified_items: Mapped[int] = mapped_column(Integer, default=0)
-    estimated_effort_hours: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(
+    title: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str | None] = mapped_column(String(20), default="NOT_STARTED")
+    total_items: Mapped[int | None] = mapped_column(Integer, default=0)
+    completed_items: Mapped[int | None] = mapped_column(Integer, default=0)
+    verified_items: Mapped[int | None] = mapped_column(Integer, default=0)
+    estimated_effort_hours: Mapped[int | None] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
@@ -109,26 +109,26 @@ class LearningItem(Base):
     __tablename__ = "learning_items"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plan_id: Mapped[int] = mapped_column(
+    plan_id: Mapped[int | None] = mapped_column(
         ForeignKey("learning_plans.id", ondelete="CASCADE"), index=True
     )
-    skill: Mapped[str] = mapped_column(String(255))
-    priority: Mapped[str] = mapped_column(String(10), default="MEDIUM")
-    objective: Mapped[str] = mapped_column(Text)
-    estimated_hours: Mapped[int] = mapped_column(Integer, default=0)
-    prerequisites: Mapped[list] = mapped_column(JSONB, default=list)
-    tasks: Mapped[list] = mapped_column(JSONB, default=list)
+    skill: Mapped[str | None] = mapped_column(String(255))
+    priority: Mapped[str | None] = mapped_column(String(10), default="MEDIUM")
+    objective: Mapped[str | None] = mapped_column(Text)
+    estimated_hours: Mapped[int | None] = mapped_column(Integer, default=0)
+    prerequisites: Mapped[list | None] = mapped_column(JSONB, default=list)
+    tasks: Mapped[list | None] = mapped_column(JSONB, default=list)
     completion_criteria: Mapped[str | None] = mapped_column(Text)
     evidence_requirement: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default="NOT_STARTED")
-    evidence_links: Mapped[list] = mapped_column(JSONB, default=list)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str | None] = mapped_column(String(20), default="NOT_STARTED")
+    evidence_links: Mapped[list | None] = mapped_column(JSONB, default=list)
+    sort_order: Mapped[int | None] = mapped_column(Integer, default=0)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
@@ -139,13 +139,13 @@ class LearningEvidence(Base):
     __tablename__ = "learning_evidence"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    item_id: Mapped[int] = mapped_column(
+    item_id: Mapped[int | None] = mapped_column(
         ForeignKey("learning_items.id", ondelete="CASCADE"), index=True
     )
-    evidence_type: Mapped[str] = mapped_column(String(50))
+    evidence_type: Mapped[str | None] = mapped_column(String(50))
     url: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -174,7 +174,7 @@ class LearningResource(Base):
     __tablename__ = "learning_resources"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    item_id: Mapped[int] = mapped_column(
+    item_id: Mapped[int | None] = mapped_column(
         ForeignKey("learning_items.id", ondelete="CASCADE"), index=True
     )
     title: Mapped[str] = mapped_column(String(500))
@@ -182,10 +182,10 @@ class LearningResource(Base):
     url: Mapped[str | None] = mapped_column(Text)
     provider: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
-    free_or_paid: Mapped[str] = mapped_column(String(20), default="UNKNOWN")
-    difficulty: Mapped[str] = mapped_column(String(20), default="UNKNOWN")
-    source: Mapped[str] = mapped_column(String(20), default="USER")
-    created_at: Mapped[datetime] = mapped_column(
+    free_or_paid: Mapped[str | None] = mapped_column(String(20), default="UNKNOWN")
+    difficulty: Mapped[str | None] = mapped_column(String(20), default="UNKNOWN")
+    source: Mapped[str | None] = mapped_column(String(20), default="USER")
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -196,7 +196,7 @@ class SkillHistory(Base):
     __tablename__ = "skill_history"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    profile_id: Mapped[int] = mapped_column(
+    profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("profiles.id", ondelete="CASCADE"), index=True
     )
     skill: Mapped[str] = mapped_column(String(255), index=True)
@@ -206,6 +206,6 @@ class SkillHistory(Base):
     new_confidence: Mapped[str | None] = mapped_column(String(20))
     source: Mapped[str] = mapped_column(String(50))
     reason: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

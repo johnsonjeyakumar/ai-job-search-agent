@@ -57,7 +57,7 @@ class ApplicationExecution(Base):
     # BLOCKED | CANCELLED
     status: Mapped[str] = mapped_column(String(30), default="EXECUTION_READY", index=True)
     current_step: Mapped[str | None] = mapped_column(String(60))
-    started_at: Mapped[datetime] = mapped_column(
+    started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -75,10 +75,10 @@ class ApplicationExecution(Base):
     # Snapshot of the daily budget when this run started.
     daily_budget: Mapped[dict] = mapped_column(JSONB, default=dict)
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
@@ -98,7 +98,7 @@ class ApplicationExecutionStep(Base):
     status: Mapped[str] = mapped_column(String(30), default="running")
     message: Mapped[str | None] = mapped_column(Text)
     url: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime] = mapped_column(
+    started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -118,6 +118,6 @@ class ApplicationExecutionEvidence(Base):
     kind: Mapped[str] = mapped_column(String(40))
     value: Mapped[str | None] = mapped_column(Text)
     url: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -80,6 +80,21 @@ SCENARIOS: dict[str, list[DetectedField]] = {
     + [_text("n1", "Why should we hire you?", required=True)],
     "confirmation": list(_BASE_FIELDS),
     "failed-submit": list(_BASE_FIELDS),
+    # Phase 14: multi-page scenarios
+    "multi-page": list(_BASE_FIELDS),
+    "conditional": list(_BASE_FIELDS),
+    "dynamic-fields": list(_BASE_FIELDS),
+    "review-page": list(_BASE_FIELDS),
+    # Phase 15: authentication scenarios
+    "auth-authenticated": list(_BASE_FIELDS),
+    "auth-password": [],  # login page, no form fields visible
+    "auth-sso": [],  # SSO redirect page
+    "auth-mfa": [],  # MFA/2FA prompt page
+    "auth-mfa-sms": [],  # SMS verification page
+    "auth-captcha": list(_BASE_FIELDS),
+    "auth-failed": [],  # auth failure page
+    "auth-session-expired": [],  # session expired page
+    "auth-unknown": list(_BASE_FIELDS),
 }
 
 
@@ -132,7 +147,7 @@ class MockBrowserDriver:
     def inspect_form(self) -> list[DetectedField]:
         return [f for f in SCENARIOS[self.scenario]]
 
-    def fill(self, target_key: str, value: str) -> FillResult:
+    def fill(self, target_key: str, value: str, force_click: bool = False) -> FillResult:
         if not self.opened:
             return FillResult(status="UNKNOWN", message="Page not opened.")
         self.filled[target_key] = value
@@ -161,7 +176,77 @@ class MockBrowserDriver:
         return self.scenario == "captcha"
 
     def detect_login(self) -> bool:
-        return self.scenario == "login-required"
+        return self.scenario in ("login-required", "auth-password", "auth-session-expired")
+
+    def detect_authentication(self):
+        """Phase 15: Multi-signal authentication detection."""
+        from app.application_execution.auth import (
+            AuthenticationState,
+            LoginType,
+            MFAType,
+        )
+
+        scenario = self.scenario
+
+        if scenario in ("auth-authenticated",):
+            return AuthenticationState.authenticated(
+                reason="Account menu and logout control detected"
+            )
+
+        if scenario in ("login-required", "auth-password"):
+            return AuthenticationState.login_required(
+                reason="Sign-in form detected with password field",
+                login_type=LoginType.PASSWORD,
+            )
+
+        if scenario == "auth-sso":
+            return AuthenticationState.login_required(
+                reason="SSO/OAuth redirect detected",
+                login_type=LoginType.SSO_OAUTH,
+            )
+
+        if scenario == "auth-mfa":
+            return AuthenticationState.mfa_required(
+                reason="MFA/2FA verification prompt detected",
+                mfa_type=MFAType.TOTP,
+            )
+
+        if scenario == "auth-mfa-sms":
+            return AuthenticationState.mfa_required(
+                reason="SMS verification code required",
+                mfa_type=MFAType.SMS,
+            )
+
+        if scenario == "auth-captcha":
+            return AuthenticationState.captcha_required(
+                reason="CAPTCHA challenge detected"
+            )
+
+        if scenario == "auth-failed":
+            return AuthenticationState.auth_failed(
+                reason="Invalid credentials error detected"
+            )
+
+        if scenario in ("auth-session-expired",):
+            return AuthenticationState.session_expired(
+                reason="Session expired, redirect to login page"
+            )
+
+        if scenario == "auth-unknown":
+            return AuthenticationState.unknown(
+                reason="No reliable authentication indicators found"
+            )
+
+        # Default: assume authenticated for normal form scenarios
+        return AuthenticationState.authenticated(
+            reason="No login indicators detected; assuming authenticated"
+        )
+
+    def get_current_domain(self) -> str:
+        """Return the current domain of the browser."""
+        from urllib.parse import urlparse
+        parsed = urlparse(self.url)
+        return parsed.hostname or "mock.test"
 
     def submit(self) -> SubmissionResult:
         self._submitted = True
@@ -189,6 +274,27 @@ class MockBrowserDriver:
 
     def close(self) -> None:
         self.opened = False
+
+    # -- Phase 14: multi-step form support -----------------------------------
+
+    def get_current_url(self) -> str:
+        return self.url
+
+    def get_heading(self) -> str | None:
+        return f"Mock {self.scenario} application form"
+
+    def get_navigation_elements(self) -> list[dict]:
+        """Return scripted navigation elements for the scenario."""
+        if self.scenario in ("multi-page", "conditional", "dynamic-fields"):
+            return [
+                {"selector": "button.next", "text": "Continue", "role": "button"},
+            ]
+        if self.scenario == "review-page":
+            return [
+                {"selector": "button.back", "text": "Back", "role": "button"},
+                {"selector": "button.submit", "text": "Submit Application", "role": "button"},
+            ]
+        return []
 
     # -- state helper for assertions ----------------------------------------
 
@@ -421,6 +527,261 @@ class PlaywrightBrowserDriver:
             except Exception:  # noqa: BLE001 - already closed
                 pass
 
+    # -- Phase 14: multi-step form support -----------------------------------
+
+    def get_current_url(self) -> str:
+        return self._page.url
+
+    def get_heading(self) -> str | None:
+        for sel in ("h1", "h2", "[role='heading']"):
+            el = self._page.query_selector(sel)
+            if el:
+                text = el.inner_text().strip()
+                if text:
+                    return text
+        return None
+
+    def get_navigation_elements(self) -> list[dict]:
+        """Detect navigation controls on the current page."""
+        elements = []
+        page = self._page
+        for btn in page.query_selector_all("button, a[role='button'], input[type=button]"):
+            text = btn.inner_text().strip() if btn else ""
+            if not text:
+                text = btn.get_attribute("aria-label") or ""
+            if not text:
+                continue
+            selector = ""
+            btn_id = btn.get_attribute("id")
+            if btn_id:
+                selector = f"#{btn_id}"
+            else:
+                btn_class = btn.get_attribute("class")
+                if btn_class:
+                    first_class = btn_class.split()[0]
+                    selector = f"button.{first_class}"
+                else:
+                    selector = f"button:text-is('{text}')"
+            elements.append({
+                "selector": selector,
+                "text": text,
+                "disabled": btn.get_attribute("disabled") is not None,
+                "role": btn.get_attribute("role") or "button",
+                "type": btn.get_attribute("type") or "button",
+            })
+        return elements
+
+    # -- Phase 15: authentication detection -----------------------------------
+
+    def detect_authentication(self):
+        """Multi-signal authentication detection.
+
+        Uses multiple signals to classify the current authentication state:
+        - Password fields (login form)
+        - OAuth/SSO buttons and redirects
+        - MFA/2FA prompts (OTP, TOTP, SMS)
+        - CAPTCHA challenges
+        - Auth error messages
+        - Account/logout indicators (authenticated)
+        - URL patterns (login pages, auth domains)
+        """
+
+        from app.application_execution.auth import (
+            AuthenticationState,
+            LoginType,
+            MFAType,
+            SessionState,
+        )
+
+        page = self._page
+        body_text = ""
+        try:
+            body_text = (page.inner_text("body") or "").lower()
+        except Exception:  # noqa: BLE001
+            pass
+
+        current_url = page.url
+
+        evidence = []
+
+        # --- CAPTCHA detection ---
+        if self.detect_captcha():
+            return AuthenticationState.captcha_required(
+                reason="CAPTCHA challenge detected"
+            )
+
+        # --- Password field detection (login form) ---
+        has_password = False
+        for sel in ("input[type=password]", "form input[type=password]"):
+            if page.query_selector(sel):
+                has_password = True
+                evidence.append(f"Password field found: {sel}")
+                break
+
+        # --- MFA/2FA detection ---
+        mfa_signals = [
+            "enter the code", "verification code", "enter code",
+            "two-factor", "2fa", "mfa", "authenticator",
+            "approve sign-in", "security verification",
+            "enter your otp", "one-time code",
+            "we sent a code", "check your phone", "check your email",
+        ]
+        has_mfa_signal = any(sig in body_text for sig in mfa_signals)
+        if has_mfa_signal:
+            evidence.append("MFA/2FA signal text detected in body")
+
+        # --- MFA input fields (OTP/TOTP) ---
+        has_otp_input = False
+        for sel in ("input[name*='otp']", "input[name*='code']", "input[name*='token']",
+                     "input[autocomplete='one-time-code']", "input[inputmode='numeric']"):
+            if page.query_selector(sel):
+                has_otp_input = True
+                evidence.append(f"OTP input field found: {sel}")
+                break
+
+        # --- OAuth/SSO detection ---
+        sso_signals = [
+            "sign in with", "continue with", "login with",
+            "google", "linkedin", "github", "microsoft",
+            "sso", "single sign-on",
+        ]
+        has_sso = any(sig in body_text for sig in sso_signals)
+        sso_buttons = page.query_selector_all(
+            "button[class*='google'], button[class*='linkedin'], "
+            "button[class*='sso'], a[href*='oauth'], a[href*='sso']"
+        )
+        if has_sso or sso_buttons:
+            evidence.append("SSO/OAuth indicators detected")
+
+        # --- Auth error detection ---
+        auth_error_signals = [
+            "invalid credentials", "incorrect password", "wrong password",
+            "login failed", "authentication failed", "invalid email",
+            "account not found", "too many attempts", "account locked",
+            "please try again", "sign in failed",
+        ]
+        has_auth_error = any(sig in body_text for sig in auth_error_signals)
+        if has_auth_error:
+            evidence.append("Authentication error message detected")
+
+        # --- Session expired detection ---
+        session_expired_signals = [
+            "session expired", "session timed out", "please log in again",
+            "your session has expired", "access denied", "unauthorized",
+            "please sign in", "login required",
+        ]
+        has_session_expired = any(sig in body_text for sig in session_expired_signals)
+        if has_session_expired:
+            evidence.append("Session expiration signal detected")
+
+        # --- Authenticated indicators ---
+        authenticated_signals = [
+            "logout", "sign out", "my account", "profile",
+            "dashboard", "welcome back",
+        ]
+        has_auth_indicator = any(sig in body_text for sig in authenticated_signals)
+        if has_auth_indicator:
+            evidence.append("Authenticated user indicators detected")
+
+        # --- URL-based signals ---
+        login_url_patterns = ["/login", "/signin", "/auth", "/sso", "/oauth"]
+        is_login_url = any(p in current_url.lower() for p in login_url_patterns)
+        if is_login_url:
+            evidence.append(f"Login URL pattern detected: {current_url}")
+
+        # --- Classification logic ---
+        # Priority: CAPTCHA > MFA > Auth Error > Session Expired
+        #           > Login Required > SSO > Authenticated > Unknown
+
+        if has_mfa_signal or has_otp_input:
+            mfa_type = MFAType.UNKNOWN
+            if any(s in body_text for s in ["sms", "text message", "phone"]):
+                mfa_type = MFAType.SMS
+            elif any(s in body_text for s in ["email", "check your inbox"]):
+                mfa_type = MFAType.EMAIL
+            elif any(s in body_text for s in ["authenticator app", "totp"]):
+                mfa_type = MFAType.TOTP
+            return AuthenticationState(
+                state=SessionState.MFA_REQUIRED,
+                confidence=0.9,
+                evidence=evidence,
+                detected_url=current_url,
+                reason="MFA/2FA verification prompt detected",
+                mfa_type=mfa_type,
+            )
+
+        if has_auth_error:
+            return AuthenticationState(
+                state=SessionState.AUTH_FAILED,
+                confidence=0.85,
+                evidence=evidence,
+                detected_url=current_url,
+                reason="Authentication error message detected",
+            )
+
+        if has_session_expired and not has_password:
+            return AuthenticationState(
+                state=SessionState.SESSION_EXPIRED,
+                confidence=0.8,
+                evidence=evidence,
+                detected_url=current_url,
+                reason="Session expired; re-login required",
+            )
+
+        if has_password:
+            login_type = LoginType.SSO_OAUTH if has_sso else LoginType.PASSWORD
+            return AuthenticationState(
+                state=SessionState.LOGIN_REQUIRED,
+                confidence=0.9,
+                evidence=evidence,
+                detected_url=current_url,
+                reason="Login form with password field detected",
+                login_type=login_type,
+            )
+
+        if has_sso and not has_password:
+            return AuthenticationState(
+                state=SessionState.LOGIN_REQUIRED,
+                confidence=0.8,
+                evidence=evidence,
+                detected_url=current_url,
+                reason="SSO/OAuth login required",
+                login_type=LoginType.SSO_OAUTH,
+            )
+
+        if has_auth_indicator:
+            return AuthenticationState(
+                state=SessionState.AUTHENTICATED,
+                confidence=0.7,
+                evidence=evidence,
+                detected_url=current_url,
+                reason="Authenticated user indicators found",
+            )
+
+        if is_login_url:
+            return AuthenticationState(
+                state=SessionState.LOGIN_REQUIRED,
+                confidence=0.75,
+                evidence=evidence,
+                detected_url=current_url,
+                reason="Current URL is a login page",
+            )
+
+        # No reliable signals — default to UNKNOWN
+        return AuthenticationState(
+            state=SessionState.UNKNOWN,
+            confidence=0.3,
+            evidence=evidence,
+            detected_url=current_url,
+            reason="No reliable authentication indicators found",
+        )
+
+    def get_current_domain(self) -> str:
+        """Return the current domain of the browser."""
+        from urllib.parse import urlparse
+        parsed = urlparse(self._page.url)
+        return parsed.hostname or ""
+
 
 def create_driver(
     url: str, driver_name: str = "auto", *, headless: bool = True
@@ -430,6 +791,9 @@ def create_driver(
     * ``mock``  -- only valid for ``mock://`` URLs (explicitly for tests).
     * ``playwright`` -- real browser; raises if Playwright is unavailable.
     * ``auto`` -- mock for ``mock://`` URLs, otherwise real Playwright.
+
+    For mock:// URLs with multi-page scenarios, returns a MultiPageMockDriver
+    that supports page transitions and dynamic fields.
     """
     parsed = urlparse(url or "")
     is_mock_url = parsed.scheme == "mock"
@@ -439,6 +803,18 @@ def create_driver(
             "(an execution can never be faked against a real site)."
         )
     if is_mock_url:
+        # Check if this is a multi-page scenario
+        from tests.multi_page_mock_driver import MULTI_PAGE_SCENARIOS
+        host = (parsed.hostname or "").strip("/")
+        is_multi = host in MULTI_PAGE_SCENARIOS
+        if not is_multi:
+            for segment in reversed(parsed.path.split("/")):
+                if segment in MULTI_PAGE_SCENARIOS:
+                    is_multi = True
+                    break
+        if is_multi:
+            from tests.multi_page_mock_driver import MultiPageMockDriver
+            return MultiPageMockDriver(url)
         return MockBrowserDriver(url)
     if driver_name in ("auto", "playwright"):
         return PlaywrightBrowserDriver(headless=headless)

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -78,10 +79,10 @@ class ApplicationPackage(Base):
     # Human-facing note when a prior package exists for the same job.
     duplicate_disclaimer: Mapped[str | None] = mapped_column(Text)
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
@@ -90,10 +91,13 @@ class ApplicationEvidence(Base):
     """Evidence-mapped requirement: real evidence vs a job requirement."""
 
     __tablename__ = "application_evidence_entries"
+    __table_args__ = (
+        Index("ix_application_evidence_package_id", "package_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     package_id: Mapped[int] = mapped_column(
-        ForeignKey("application_packages.id", ondelete="CASCADE"), index=True
+        ForeignKey("application_packages.id", ondelete="CASCADE")
     )
     requirement: Mapped[str] = mapped_column(String(500))
     category: Mapped[str] = mapped_column(String(50))
@@ -105,7 +109,7 @@ class ApplicationEvidence(Base):
     # HIGH | MEDIUM | LOW
     confidence: Mapped[str] = mapped_column(String(10), default="LOW")
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -119,13 +123,17 @@ class ApplicationTailoringSuggestion(Base):
     """
 
     __tablename__ = "application_tailoring_suggestions"
+    __table_args__ = (
+        Index("ix_application_tailoring_package_id", "package_id"),
+        Index("ix_application_tailoring_resume_id", "resume_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     package_id: Mapped[int] = mapped_column(
-        ForeignKey("application_packages.id", ondelete="CASCADE"), index=True
+        ForeignKey("application_packages.id", ondelete="CASCADE")
     )
     resume_id: Mapped[int | None] = mapped_column(
-        ForeignKey("resumes.id", ondelete="SET NULL"), index=True
+        ForeignKey("resumes.id", ondelete="SET NULL")
     )
     requirement: Mapped[str] = mapped_column(String(500))
     category: Mapped[str] = mapped_column(String(50))
@@ -138,7 +146,7 @@ class ApplicationTailoringSuggestion(Base):
     review_status: Mapped[str] = mapped_column(String(30), default="NEEDS_USER_REVIEW")
     applied: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -162,10 +170,10 @@ class ApplicationAnswer(Base):
     validation_status: Mapped[str] = mapped_column(String(30), default="NEEDS_REVIEW")
     feedback: Mapped[str | None] = mapped_column(Text)
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
@@ -174,10 +182,13 @@ class ApplicationValidationFinding(Base):
     """A single truth/consistency check result for a package."""
 
     __tablename__ = "application_validation_results"
+    __table_args__ = (
+        Index("ix_application_validation_package_id", "package_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     package_id: Mapped[int] = mapped_column(
-        ForeignKey("application_packages.id", ondelete="CASCADE"), index=True
+        ForeignKey("application_packages.id", ondelete="CASCADE")
     )
     section: Mapped[str] = mapped_column(String(50))
     check: Mapped[str] = mapped_column(String(255))
@@ -185,6 +196,6 @@ class ApplicationValidationFinding(Base):
     status: Mapped[str] = mapped_column(String(30))
     message: Mapped[str | None] = mapped_column(Text)
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

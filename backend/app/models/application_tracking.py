@@ -184,7 +184,7 @@ class ApplicationEvent(Base):
     event_type: Mapped[str] = mapped_column(String(50), index=True)
     previous_status: Mapped[str | None] = mapped_column(String(40))
     new_status: Mapped[str | None] = mapped_column(String(40))
-    event_timestamp: Mapped[datetime] = mapped_column(
+    event_timestamp: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
     # USER | SYSTEM | BROWSER | EXECUTION | IMPORT | API
@@ -194,7 +194,7 @@ class ApplicationEvent(Base):
     # reserved class attribute name.
     event_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -213,7 +213,7 @@ class ApplicationResponse(Base):
     category: Mapped[str] = mapped_column(String(40))
     received_at: Mapped[date] = mapped_column(Date, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -234,7 +234,7 @@ class InterviewRecord(Base):
     # SCHEDULED | COMPLETED | CANCELLED | NO_SHOW | OTHER
     status: Mapped[str] = mapped_column(String(30), default="SCHEDULED")
     notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -252,6 +252,6 @@ class OfferRecord(Base):
     # RECEIVED | ACCEPTED | DECLINED | EXPIRED
     status: Mapped[str] = mapped_column(String(30), default="RECEIVED")
     notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

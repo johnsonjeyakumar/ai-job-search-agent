@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -65,27 +65,30 @@ class ApplicationQueueItem(Base):
     """
 
     __tablename__ = "application_queue_items"
+    __table_args__ = (
+        Index("ix_queue_state_priority", "queue_state", "priority_score"),
+        Index("ix_queue_attention", "attention"),
+        Index("ix_queue_job", "job_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     application_id: Mapped[int] = mapped_column(
-        ForeignKey("applications.id", ondelete="CASCADE"), index=True
+        ForeignKey("applications.id", ondelete="CASCADE")
     )
     package_id: Mapped[int] = mapped_column(
-        ForeignKey("application_packages.id", ondelete="CASCADE"), index=True
+        ForeignKey("application_packages.id", ondelete="CASCADE")
     )
     job_id: Mapped[int] = mapped_column(
-        ForeignKey("jobs.id", ondelete="CASCADE"), index=True
+        ForeignKey("jobs.id", ondelete="CASCADE")
     )
     # Orchestration state — distinct from application lifecycle_status.
-    queue_state: Mapped[str] = mapped_column(
-        String(30), default="QUEUED", index=True
-    )
+    queue_state: Mapped[str] = mapped_column(String(30), default="QUEUED")
     # Attention category: AUTO | ASK | REVIEW | BLOCK (set after preflight).
-    attention: Mapped[str | None] = mapped_column(String(20), index=True)
+    attention: Mapped[str | None] = mapped_column(String(20))
     # Why the item needs attention (populated when attention != AUTO).
     attention_reason: Mapped[str | None] = mapped_column(Text)
     # Deterministic priority score (higher = process first).
-    priority_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    priority_score: Mapped[float] = mapped_column(Float, default=0.0)
     # Snapshot of scores at queue time (for display + audit).
     match_score: Mapped[float | None] = mapped_column(Float)
     opportunity_score: Mapped[float | None] = mapped_column(Float)
@@ -103,7 +106,11 @@ class ApplicationQueueItem(Base):
     )
     # Linked autopilot run (set when autopilot picks up this item).
     autopilot_run_id: Mapped[int | None] = mapped_column(
-        ForeignKey("autopilot_runs.id", ondelete="SET NULL")
+        ForeignKey(
+            "autopilot_runs.id",
+            ondelete="SET NULL",
+            name="fk_queue_autopilot_run",
+        )
     )
     # User-supplied resolution for NEEDS_INPUT items (JSON dict).
     resolution_data: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -114,10 +121,10 @@ class ApplicationQueueItem(Base):
     # Ordering within the same priority (lower = first).
     position: Mapped[int] = mapped_column(Integer, default=0)
     # Timestamps.
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -132,11 +139,12 @@ class AutopilotRun(Base):
     """
 
     __tablename__ = "autopilot_runs"
+    __table_args__ = (
+        Index("ix_autopilot_status", "status"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    status: Mapped[str] = mapped_column(
-        String(20), default="IDLE", index=True
-    )
+    status: Mapped[str] = mapped_column(String(20), default="IDLE")
     target_count: Mapped[int] = mapped_column(Integer, default=0)
     processed_count: Mapped[int] = mapped_column(Integer, default=0)
     submitted_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -146,13 +154,20 @@ class AutopilotRun(Base):
     failed_count: Mapped[int] = mapped_column(Integer, default=0)
     skipped_count: Mapped[int] = mapped_column(Integer, default=0)
     # Current item being processed (for live UI display).
+    # use_alter=True breaks the circular FK dependency with application_queue_items
+    # during DROP TABLE (application_queue_items -> autopilot_runs -> application_queue_items).
     current_queue_item_id: Mapped[int | None] = mapped_column(
-        ForeignKey("application_queue_items.id", ondelete="SET NULL")
+        ForeignKey(
+            "application_queue_items.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_autopilot_current_item",
+        )
     )
     # Error message if the run itself failed.
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

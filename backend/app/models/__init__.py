@@ -37,6 +37,14 @@ from app.models.preferences import Preferences
 from app.models.profile import Profile
 from app.models.quality import JobQualityScore
 from app.models.resume import Resume
+from app.models.skill_gap import (
+    LearningEvidence,
+    LearningItem,
+    LearningPlan,
+    LearningResource,
+    SkillGapAnalysis,
+    SkillHistory,
+)
 
 __all__ = [
     "Profile",
@@ -71,4 +79,10 @@ __all__ = [
     "InterviewQuestion",
     "InterviewSession",
     "InterviewPrepItem",
+    "SkillGapAnalysis",
+    "LearningPlan",
+    "LearningItem",
+    "LearningEvidence",
+    "LearningResource",
+    "SkillHistory",
 ]

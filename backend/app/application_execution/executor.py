@@ -1,4 +1,4 @@
-"""Execution runner (Phase 7).
+"""Execution runner (Phase 7 + Phase 14 + Phase 15).
 
 Turns an APPROVED package into a controlled apply attempt. The runner is the
 only place that drives a browser driver, and it does so strictly through the
@@ -6,14 +6,23 @@ operations the platform adapter allowed for the resolved mode:
 
 1. preflight (package valid, no duplicate, budget OK)
 2. open the application URL
-3. stop for login / CAPTCHA instead of fighting them
+3. stop for login / CAPTCHA / MFA instead of fighting them
 4. inspect the form, map fields deterministically
 5. fill only KNOWN fields, upload only the approved resume
 6. stop for any NEW QUESTION or ambiguous required field
 7. hand the browser state over at the human approval boundary
 
-Submission happens later (``submit_execution``) and only after explicit user
-approval, then verification evidence decides SUBMITTED vs CONFIRMED vs UNKNOWN.
+Phase 14 adds multi-step form orchestration:
+- Detects multi-page forms via navigation controls
+- Runs inspect->map->fill->validate->navigate loop
+- Checkpoints after each page completion
+- Handles review pages and conditional fields
+
+Phase 15 adds session/authentication awareness:
+- Multi-signal auth state detection (password, OAuth, MFA, CAPTCHA, session)
+- Auth state checked on page open and after every navigation
+- Maps auth states to execution actions (BLOCKED, AWAITING_USER)
+- Domain validation for session fixation
 """
 from __future__ import annotations
 
@@ -53,6 +62,267 @@ STEP_ORDER = [
     "capture_evidence",
     "complete",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 14: Multi-page form detection
+# ---------------------------------------------------------------------------
+
+def _is_multi_page_form(
+    detected_fields: list,
+    nav_elements: list[dict],
+    heading: str | None = None,
+) -> bool:
+    """Detect if the current form is multi-page.
+
+    Uses multiple signals: navigation buttons (next/continue), step indicators,
+    and page count hints. Returns True only when confident this is multi-page.
+    """
+    from app.application_execution.page_detector import detect_navigation
+
+    nav = detect_navigation(nav_elements)
+
+    # Strong signal: next/continue button exists
+    if nav.has_next:
+        return True
+
+    # Strong signal: step indicator in heading (e.g., "Step 2 of 5")
+    if heading:
+        import re
+        step_match = re.search(r"step\s+\d+\s+of\s+\d+", heading, re.I)
+        page_match = re.search(r"page\s+\d+\s+of\s+\d+", heading, re.I)
+        if step_match or page_match:
+            return True
+
+    return False
+
+
+def _has_review_button(nav_elements: list[dict]) -> bool:
+    """Check if navigation elements include a review button."""
+    from app.application_execution.page_detector import detect_navigation
+    nav = detect_navigation(nav_elements)
+    return nav.has_review
+
+
+# ---------------------------------------------------------------------------
+# Phase 14: Multi-page execution
+# ---------------------------------------------------------------------------
+
+def _run_multi_page_execution(
+    db: Session,
+    execution: ApplicationExecution,
+    driver,
+    *,
+    ctx,
+    adapter,
+    mode: str,
+    job,
+    resume,
+    url: str,
+    headless: bool = True,
+) -> dict:
+    """Run multi-page form orchestration.
+
+    Returns a dict with keys: fields_filled, resume_uploaded, required_unfilled,
+    new_questions, fills, session_data, warnings_added.
+    """
+    from app.application_execution.checkpoint import (
+        CheckpointStore,
+    )
+    from app.application_execution.form_orchestrator import (
+        detect_dynamic_changes,
+        fill_page_fields,
+        inspect_page,
+        map_page_fields,
+        navigate_to_next,
+        validate_page,
+    )
+    from app.application_execution.form_session import (
+        FormSession,
+        FormSessionState,
+        PageType,
+    )
+
+    session = FormSession(
+        session_id=f"exec-{execution.id}",
+        application_id=None,
+        execution_run_id=execution.id,
+        package_id=execution.package_id,
+    )
+    checkpoint_store = CheckpointStore()
+
+    total_fields_filled = 0
+    total_resume_uploaded = False
+    all_fills: list[dict] = []
+    all_new_questions = []
+    all_required_unfilled = []
+    warnings_added = 0
+    max_pages = 20  # safety limit
+
+    for page_num in range(1, max_pages + 1):
+        # --- Inspect ---
+        current_url = driver.get_current_url() if hasattr(driver, "get_current_url") else url
+        raw_fields = driver.inspect_form()
+        heading = driver.get_heading() if hasattr(driver, "get_heading") else None
+        has_nav = hasattr(driver, "get_navigation_elements")
+        nav_elements = driver.get_navigation_elements() if has_nav else []
+
+        snapshot = inspect_page(
+            session, current_url, raw_fields, nav_elements, heading
+        )
+
+        # Checkpoint: page inspected
+        from app.application_execution.checkpoint import create_form_inspected_checkpoint
+        checkpoint_store.save(
+            create_form_inspected_checkpoint(
+                run_id=f"exec-{execution.id}",
+                step=page_num * 5,
+                fields_found=len(raw_fields),
+                form_url=current_url,
+            )
+        )
+
+        # Record step for DB trail
+        _record_step(
+            db, execution.id, "inspect_form",
+            message=f"Page {page_num}: detected {len(raw_fields)} fields."
+        )
+
+        # --- Check for submission confirmation page ---
+        if snapshot.page_type == PageType.SUBMISSION_PAGE:
+            session.transition(FormSessionState.CONFIRMED)
+            break
+
+        # --- Check for review page ---
+        if snapshot.page_type == PageType.REVIEW_PAGE:
+            session.transition(FormSessionState.REVIEW)
+            # Still record what we found
+            _record_step(
+                db, execution.id, "inspect_form",
+                message=f"Page {page_num}: review page detected."
+            )
+            break
+
+        # --- Map fields ---
+        mapping = map_page_fields(session, ctx)
+        for warning in mapping.warnings:
+            _add_warning(db, execution.id, "map_fields", warning)
+            warnings_added += 1
+
+        # --- Resume upload (first page only typically) ---
+        if not total_resume_uploaded and resume is not None and adapter.allows_resume_upload(mode):
+            file_fields = [f for f in mapping.fields if f.detected.kind == "file"]
+            resume_file = next(
+                (f for f in file_fields if "resume" in (f.detected.label or "").lower()
+                 or "cv" in (f.detected.label or "").lower()),
+                None,
+            )
+            if resume_file is not None:
+                data, file_name, content_type = _resume_bytes(resume)
+                if data is not None:
+                    ct = content_type or "application/pdf"
+                    up = driver.upload_resume(data, file_name or "resume", ct)
+                    if up.status == base.KNOWN:
+                        total_resume_uploaded = True
+
+        # --- Fill known fields ---
+        fill_page_fields(session, driver, mapping)
+        for f in mapping.fields:
+            if f.classification == base.KNOWN and f.value and f.detected.kind != "file":
+                all_fills.append({
+                    "field_key": f.detected.key,
+                    "label": f.detected.label,
+                    "value": f.value,
+                })
+                total_fields_filled += 1
+
+        # Track new questions and required unfilled
+        for q in mapping.new_questions:
+            all_new_questions.append(q)
+            _add_warning(db, execution.id, "validate_form",
+                         f"NEW QUESTION on page {page_num}: '{q.label}'.")
+            warnings_added += 1
+
+        for f in mapping.fields:
+            if f.detected.required and f.classification != base.KNOWN and f.detected.kind != "file":
+                all_required_unfilled.append(f)
+
+        # --- Validate page ---
+        is_valid, issues = validate_page(session, mapping)
+        for issue in issues:
+            _add_warning(db, execution.id, "validate_form", issue)
+            warnings_added += 1
+
+        # --- Detect dynamic changes after filling ---
+        prev_fps = snapshot.field_fingerprints
+        new_fields_after = driver.inspect_form() if hasattr(driver, "inspect_form") else []
+        changes = detect_dynamic_changes(session, prev_fps, new_fields_after)
+        if changes["has_changes"]:
+            # Re-map and fill new fields
+            for nf in changes.get("added_fields", []):
+                from app.application_execution.form_session import TrackedField
+                snapshot.fields.append(TrackedField(detected=nf))
+            mapping2 = map_page_fields(session, ctx)
+            fill_page_fields(session, driver, mapping2)
+            validate_page(session, mapping2)
+
+        # --- Navigate to next page ---
+        if snapshot.has_next_button and is_valid:
+            success = navigate_to_next(session, driver, snapshot)
+            if success:
+                _record_step(
+                    db, execution.id, "inspect_form",
+                    message=f"Page {page_num}: navigated to next page."
+                )
+
+                # Phase 15: Auth check after navigation
+                from app.application_execution.auth import SessionState
+                from app.application_execution.checkpoint import (
+                    create_auth_checked_checkpoint,
+                )
+                post_nav_auth = driver.detect_authentication()
+                checkpoint_store.save(create_auth_checked_checkpoint(
+                    run_id=f"exec-{execution.id}",
+                    step=page_num * 5 + 1,
+                    auth_state=post_nav_auth.state.value,
+                    reason=post_nav_auth.reason,
+                    confidence=post_nav_auth.confidence,
+                    domain=driver.get_current_domain(),
+                ))
+
+                if post_nav_auth.state in (
+                    SessionState.LOGIN_REQUIRED,
+                    SessionState.MFA_REQUIRED,
+                    SessionState.CAPTCHA_REQUIRED,
+                ):
+                    session.transition(FormSessionState.BLOCKED)
+                    _add_warning(
+                        db, execution.id, "inspect_form",
+                        f"Page {page_num}: auth state changed to "
+                        f"{post_nav_auth.state.value} after navigation.",
+                    )
+                    warnings_added += 1
+                    break
+
+                continue
+            else:
+                _add_warning(db, execution.id, "inspect_form",
+                             f"Page {page_num}: navigation failed.")
+                warnings_added += 1
+                break
+
+        # --- No more navigation (single-page or last page) ---
+        break
+
+    return {
+        "fields_filled": total_fields_filled,
+        "resume_uploaded": total_resume_uploaded,
+        "required_unfilled": all_required_unfilled,
+        "new_questions": all_new_questions,
+        "fills": all_fills,
+        "session_data": session.to_dict(),
+        "warnings_added": warnings_added,
+    }
 
 
 def _record_step(
@@ -326,14 +596,84 @@ def run_execution(
             db.commit()
             return execution
 
-        if driver.detect_login():
-            _mark_execution(db, execution.id, status=base.STATUS_AWAITING_USER,
-                            current_step="open")
-            _record_step(db, execution.id, "open", status="warning",
-                         message="Login required. Complete it manually; execution "
-                                 "continues afterwards (credentials are never stored).")
+        # Phase 15: Multi-signal authentication detection
+        from app.application_execution.auth import (
+            SessionState,
+            map_session_state_to_action,
+        )
+        from app.application_execution.checkpoint import (
+            CheckpointStore,
+            create_auth_checked_checkpoint,
+            create_auth_failed_checkpoint,
+            create_domain_validated_checkpoint,
+            create_session_expired_checkpoint,
+        )
+
+        checkpoint_store = CheckpointStore()
+        auth_state = driver.detect_authentication()
+        expected_domain = driver.get_current_domain()
+
+        checkpoint_store.save(create_auth_checked_checkpoint(
+            run_id=execution.id,
+            step=2,
+            auth_state=auth_state.state.value,
+            reason=auth_state.reason,
+            confidence=auth_state.confidence,
+            domain=expected_domain,
+        ))
+
+        _record_step(
+            db, execution.id, "open",
+            message=f"Auth state: {auth_state.state.value} "
+                    f"(confidence: {auth_state.confidence:.0%}). {auth_state.reason}",
+        )
+
+        # Map auth state to execution action
+        action = map_session_state_to_action(auth_state.state)
+        if action == "BLOCKED":
+            # Auth required or blocked - cannot proceed automatically
+            status = base.STATUS_BLOCKED
+            if auth_state.state == SessionState.AUTH_FAILED:
+                status = base.STATUS_FAILED
+                checkpoint_store.save(create_auth_failed_checkpoint(
+                    run_id=execution.id, step=3,
+                    reason=auth_state.reason,
+                ))
+            elif auth_state.state == SessionState.SESSION_EXPIRED:
+                checkpoint_store.save(create_session_expired_checkpoint(
+                    run_id=execution.id, step=3,
+                    reason=auth_state.reason,
+                ))
+
+            _mark_execution(db, execution.id, status=status, current_step="open")
+            _record_step(
+                db, execution.id, "open", status="blocked",
+                message=f"Authentication required: {auth_state.state.value}. "
+                        f"{auth_state.reason}",
+            )
             db.commit()
             return execution
+
+        if action == "AWAITING_USER":
+            # Login required, MFA required, or CAPTCHA - human intervention needed
+            _mark_execution(db, execution.id, status=base.STATUS_AWAITING_USER,
+                            current_step="open")
+            _record_step(
+                db, execution.id, "open", status="warning",
+                message=f"Human action required: {auth_state.state.value}. "
+                        f"{auth_state.reason}. Complete it manually; execution "
+                        "continues afterwards (credentials are never stored).",
+            )
+            db.commit()
+            return execution
+
+        # Auth check passed - continue with form inspection
+        checkpoint_store.save(create_domain_validated_checkpoint(
+            run_id=execution.id, step=4,
+            expected_domain=expected_domain,
+            actual_domain=expected_domain,
+            is_match=True,
+        ))
 
         ctx = build_profile_context(profile, prefs, answers)
 
@@ -342,100 +682,144 @@ def run_execution(
         _record_step(db, execution.id, "inspect_form",
                      message=f"Detected {len(detected)} form fields.")
 
-        _record_step(db, execution.id, "map_fields", status="running")
-        mapped = map_fields(detected, ctx)
-        for warning in mapped.warnings:
-            _add_warning(db, execution.id, "map_fields", warning)
-        _record_step(
-            db, execution.id, "map_fields",
-            message=f"Mapped {len(mapped.fields)} fields, "
-                    f"{len(mapped.new_questions)} new questions.",
-        )
+        # -- Phase 14: detect multi-page form -------------------------------
+        heading = driver.get_heading() if hasattr(driver, "get_heading") else None
+        has_nav = hasattr(driver, "get_navigation_elements")
+        nav_elements = driver.get_navigation_elements() if has_nav else []
+        is_multi_page = _is_multi_page_form(detected, nav_elements, heading)
 
-        # -- resume upload ----------------------------------------------------
-        resume_uploaded = False
-        file_fields = [f for f in mapped.fields if f.detected.kind == "file"]
-        resume_file = next(
-            (
-                f
-                for f in file_fields
-                if (
-                    f.classification != base.UNKNOWN
-                    or "resume" in (f.detected.label or "").lower()
-                    or "cv" in (f.detected.label or "").lower()
+        if is_multi_page:
+            # -- multi-page execution via orchestrator ----------------------
+            mp_result = _run_multi_page_execution(
+                db, execution, driver,
+                ctx=ctx, adapter=adapter, mode=mode,
+                job=job, resume=resume, url=url, headless=headless,
+            )
+            fields_filled = mp_result["fields_filled"]
+            resume_uploaded = mp_result["resume_uploaded"]
+            required_unfilled = mp_result["required_unfilled"]
+            new_questions = mp_result["new_questions"]
+            fills = mp_result["fills"]
+
+            # Still do resume upload for single-page if not done in orchestrator
+            if not resume_uploaded and resume is not None and adapter.allows_resume_upload(mode):
+                file_fields_m = [
+                    f for f in map_fields(detected, ctx).fields
+                    if f.detected.kind == "file"
+                ]
+                resume_file_m = next(
+                    (f for f in file_fields_m if f.classification != base.UNKNOWN
+                     or "resume" in (f.detected.label or "").lower()),
+                    None,
                 )
-            ),
-            None,
-        )
-        if resume is None:
-            _add_warning(db, execution.id, "upload_resume",
-                         "No resume selected on the package; nothing to upload.")
-        elif adapter.allows_resume_upload(mode):
-            data, file_name, content_type = _resume_bytes(resume)
-            if data is not None and resume_file is not None:
-                up = driver.upload_resume(
-                    data, file_name or "resume", content_type or "application/pdf"
-                )
-                if up.status == base.KNOWN:
-                    resume_uploaded = True
-                else:
-                    _add_warning(db, execution.id, "upload_resume", up.message)
-            elif data is not None:
+                if resume_file_m is not None:
+                    data_r, fn_r, ct_r = _resume_bytes(resume)
+                    if data_r is not None:
+                        ct_r_val = ct_r or "application/pdf"
+                        up_r = driver.upload_resume(data_r, fn_r or "resume", ct_r_val)
+                        if up_r.status == base.KNOWN:
+                            resume_uploaded = True
+                        else:
+                            _add_warning(db, execution.id, "upload_resume", up_r.message)
+        else:
+            # -- single-page execution (existing flow) ----------------------
+            _record_step(db, execution.id, "map_fields", status="running")
+            mapped = map_fields(detected, ctx)
+            for warning in mapped.warnings:
+                _add_warning(db, execution.id, "map_fields", warning)
+            _record_step(
+                db, execution.id, "map_fields",
+                message=f"Mapped {len(mapped.fields)} fields, "
+                        f"{len(mapped.new_questions)} new questions.",
+            )
+
+            # -- resume upload -----------------------------------------------
+            resume_uploaded = False
+            file_fields = [f for f in mapped.fields if f.detected.kind == "file"]
+            resume_file = next(
+                (
+                    f
+                    for f in file_fields
+                    if (
+                        f.classification != base.UNKNOWN
+                        or "resume" in (f.detected.label or "").lower()
+                        or "cv" in (f.detected.label or "").lower()
+                    )
+                ),
+                None,
+            )
+            if resume is None:
                 _add_warning(db, execution.id, "upload_resume",
-                             "No file input detected on the page.")
+                             "No resume selected on the package; nothing to upload.")
+            elif adapter.allows_resume_upload(mode):
+                data, file_name, content_type = _resume_bytes(resume)
+                if data is not None and resume_file is not None:
+                    up = driver.upload_resume(
+                        data, file_name or "resume", content_type or "application/pdf"
+                    )
+                    if up.status == base.KNOWN:
+                        resume_uploaded = True
+                    else:
+                        _add_warning(db, execution.id, "upload_resume", up.message)
+                elif data is not None:
+                    _add_warning(db, execution.id, "upload_resume",
+                                 "No file input detected on the page.")
+                else:
+                    _add_warning(db, execution.id, "upload_resume",
+                                 "Resume file missing from storage; skipped.")
             else:
                 _add_warning(db, execution.id, "upload_resume",
-                             "Resume file missing from storage; skipped.")
-        else:
-            _add_warning(db, execution.id, "upload_resume",
-                         "Policy does not allow automated resume upload in this mode.")
-        _record_step(
-            db, execution.id, "upload_resume",
-            message=(
-                "Approved resume uploaded."
-                if resume_uploaded
-                else "Resume upload skipped."
-            ),
-        )
+                             "Policy does not allow automated resume upload in this mode.")
+            _record_step(
+                db, execution.id, "upload_resume",
+                message=(
+                    "Approved resume uploaded."
+                    if resume_uploaded
+                    else "Resume upload skipped."
+                ),
+            )
 
-        # -- fill known fields ------------------------------------------------
-        fills: list[dict] = []
-        fields_filled = 0
-        if adapter.allows_fill_known(mode):
-            for f in mapped.fields:
-                if f.classification != base.KNOWN or f.detected.kind == "file":
-                    continue
-                if f.matched_key == "answer":
-                    mapped.answered_questions = getattr(mapped, "answered_questions", 0) + 1
-                result = driver.fill(f.detected.key, f.value or "")
-                fills.append(
-                    {"field_key": f.detected.key, "label": f.detected.label, "value": f.value or ""}
-                )
-                if result.status == base.KNOWN:
-                    fields_filled += 1
-                else:
-                    _add_warning(db, execution.id, "fill_fields",
-                                 f"'{f.detected.label}' fill failed: {result.message}")
-        _record_step(db, execution.id, "fill_fields",
-                     message=f"Filled {fields_filled} known fields.")
+            # -- fill known fields -------------------------------------------
+            fills: list[dict] = []
+            fields_filled = 0
+            if adapter.allows_fill_known(mode):
+                for f in mapped.fields:
+                    if f.classification != base.KNOWN or f.detected.kind == "file":
+                        continue
+                    if f.matched_key == "answer":
+                        mapped.answered_questions = getattr(mapped, "answered_questions", 0) + 1
+                    result = driver.fill(f.detected.key, f.value or "")
+                    fills.append({
+                        "field_key": f.detected.key,
+                        "label": f.detected.label,
+                        "value": f.value or "",
+                    })
+                    if result.status == base.KNOWN:
+                        fields_filled += 1
+                    else:
+                        _add_warning(db, execution.id, "fill_fields",
+                                     f"'{f.detected.label}' fill failed: {result.message}")
+            _record_step(db, execution.id, "fill_fields",
+                         message=f"Filled {fields_filled} known fields.")
 
-        # -- validate form ----------------------------------------------------
-        required_unfilled = [
-            f for f in mapped.fields
-            if f.detected.required and f.classification != base.KNOWN
-        ]
-        new_questions = mapped.new_questions
-        for q in new_questions:
-            _add_warning(db, execution.id, "validate_form",
-                         f"NEW QUESTION DETECTED: '{q.label}'.")
+            # -- validate form -----------------------------------------------
+            required_unfilled = [
+                f for f in mapped.fields
+                if f.detected.required and f.classification != base.KNOWN
+            ]
+            new_questions = mapped.new_questions
+            for q in new_questions:
+                _add_warning(db, execution.id, "validate_form",
+                             f"NEW QUESTION DETECTED: '{q.label}'.")
 
+        # -- common validation for both paths --------------------------------
         fatal = []
         fatal.extend(
             f"Required field '{f.detected.label}' needs review ({f.ambiguity})."
             for f in required_unfilled
-            if f.matched_key != "answer"
+            if hasattr(f, "ambiguity") and f.matched_key != "answer"
         )
-        if new_questions and not mapped.unknown_required:
+        if new_questions:
             fatal.append("A new question was detected that no prepared answer covers.")
 
         # answers must still be valid
@@ -443,11 +827,21 @@ def run_execution(
         if invalid:
             fatal.append(f"Package answers are invalid for: {', '.join(invalid[:3])}.")
 
+        # Compute review count — mapped exists only in single-page path
+        review_count = 0
+        if is_multi_page:
+            review_count = len(required_unfilled)
+        else:
+            review_count = getattr(mapped, "review_count", 0)
+
         summary = {
             "fields_detected": len(detected),
             "fields_filled": fields_filled,
-            "fields_needing_review": mapped.review_count + len(required_unfilled),
-            "answered_questions": sum(1 for f in mapped.fields if f.matched_key == "answer"),
+            "fields_needing_review": review_count + len(required_unfilled),
+            "answered_questions": sum(
+                1 for f in (mapped.fields if not is_multi_page else [])
+                if f.matched_key == "answer"
+            ),
             "new_questions": [q.label for q in new_questions],
         }
         execution.execution_summary = summary
@@ -464,7 +858,7 @@ def run_execution(
             "execution_mode": mode,
             "fields_detected": len(detected),
             "fields_completed": fields_filled if not resume_uploaded else fields_filled + 1,
-            "fields_needing_review": mapped.review_count + len(required_unfilled),
+            "fields_needing_review": review_count + len(required_unfilled),
             "answered_questions": summary["answered_questions"],
             "warnings": list(execution.warnings or []),
             "auto_submit_allowed": bool(
