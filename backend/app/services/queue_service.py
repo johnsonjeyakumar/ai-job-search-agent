@@ -365,12 +365,10 @@ def run_preflight(db: Session, item_id: int) -> ApplicationQueueItem:
     15. Duplicate detection via Phase 19 (Phase 20)
     """
     from app.application_execution.preflight import (
-        JobAvailability,
         run_preflight_checks,
     )
     from app.application_execution.submission_verify import (
         check_duplicate,
-        DuplicateVerdict,
     )
 
     item = db.get(ApplicationQueueItem, item_id)
@@ -526,7 +524,9 @@ def run_preflight(db: Session, item_id: int) -> ApplicationQueueItem:
     prior_exec = db.scalar(
         select(ApplicationExecution)
         .where(ApplicationExecution.package_id == item.package_id)
-        .where(ApplicationExecution.status.in_(["SUBMITTED", "SUBMISSION_CONFIRMED", "SUBMISSION_UNKNOWN"]))
+        .where(ApplicationExecution.status.in_([
+            "SUBMITTED", "SUBMISSION_CONFIRMED", "SUBMISSION_UNKNOWN",
+        ]))
         .order_by(ApplicationExecution.id.desc())
         .limit(1)
     )
@@ -580,6 +580,123 @@ def run_preflight(db: Session, item_id: int) -> ApplicationQueueItem:
             attention = ATTENTION_BLOCK
         elif result.needs_review:
             attention = ATTENTION_REVIEW
+
+    # ── Phase 22: Readiness gate ────────────────────────────────────────
+
+    # 14. Application readiness gate
+    from app.application_execution.readiness import (
+        ReadinessStatus,
+        run_readiness_check,
+    )
+
+    # Build full profile data for readiness check
+    full_profile_data = {}
+    if profile:
+        full_profile_data = {
+            "name": getattr(profile, "name", None),
+            "email": getattr(profile, "email", None),
+            "phone": getattr(profile, "phone", None),
+            "city": getattr(profile, "city", None),
+            "state": getattr(profile, "state", None),
+            "country": getattr(profile, "country", None),
+            "degree": getattr(profile, "degree", None),
+            "university": getattr(profile, "university", None),
+            "graduation_year": getattr(profile, "graduation_year", None),
+            "experience_level": getattr(profile, "experience_level", None),
+            "skills": getattr(profile, "skills", None),
+            "work_authorization": getattr(profile, "work_authorization", None),
+            "salary_preference": getattr(profile, "salary_preference", None),
+            "linkedin_url": getattr(profile, "linkedin_url", None),
+            "github_url": getattr(profile, "github_url", None),
+            "portfolio_url": getattr(profile, "portfolio_url", None),
+        }
+
+    # Build package data for readiness check
+    pkg_data = {
+        "status": package.status,
+        "quality_gate": package.quality_gate,
+        "readiness": package.readiness,
+        "selected_resume_id": package.selected_resume_id,
+        "cover_letter": package.cover_letter,
+        "cover_letter_status": package.cover_letter_status,
+    }
+
+    # Build resume data
+    res_data = None
+    if resume:
+        res_data = {
+            "name": resume.name,
+            "file_path": resume.file_path,
+            "is_active": resume.is_active,
+        }
+
+    # Build job data
+    job_data = {
+        "description": getattr(job, "description", None),
+        "tags": getattr(job, "tags", None) or [],
+    }
+
+    # Collect previous executions for readiness check
+    prev_execs_for_readiness = []
+    all_prev_execs = list(
+        db.scalars(
+            select(ApplicationExecution)
+            .where(ApplicationExecution.package_id == item.package_id)
+            .order_by(ApplicationExecution.id.desc())
+            .limit(5)
+        )
+    )
+    for pe in all_prev_execs:
+        prev_execs_for_readiness.append({
+            "id": pe.id,
+            "status": pe.status,
+            "submission_status": pe.submission_status,
+        })
+
+    readiness_result = run_readiness_check(
+        profile_data=full_profile_data if full_profile_data else None,
+        package_data=pkg_data,
+        resume_data=res_data,
+        job_data=job_data,
+        previous_executions=prev_execs_for_readiness if prev_execs_for_readiness else None,
+        duplicate_status=dup_status,
+        application_id=item.application_id,
+        job_id=job.id,
+        package_id=item.package_id,
+    )
+
+    # Apply readiness gate decisions
+    if readiness_result.status == ReadinessStatus.BLOCKED:
+        attention = ATTENTION_BLOCK
+        reasons.append(
+            f"Readiness gate BLOCKED: "
+            f"{'; '.join(readiness_result.reason_codes)}"
+        )
+    elif readiness_result.status == ReadinessStatus.INVALID:
+        attention = ATTENTION_BLOCK
+        reasons.append(
+            f"Readiness gate INVALID: "
+            f"{'; '.join(readiness_result.reason_codes)}"
+        )
+    elif readiness_result.status == ReadinessStatus.NEEDS_INPUT:
+        if attention != ATTENTION_BLOCK:
+            attention = ATTENTION_ASK
+            missing_labels = [r.label for r in readiness_result.missing_requirements]
+            reasons.append(
+                f"Readiness gate NEEDS_INPUT: missing {', '.join(missing_labels)}"
+            )
+    elif readiness_result.status == ReadinessStatus.REVIEW:
+        if attention != ATTENTION_BLOCK:
+            attention = ATTENTION_REVIEW
+            reasons.append(
+                f"Readiness gate REVIEW: "
+                f"{'; '.join(readiness_result.reason_codes)}"
+            )
+    elif readiness_result.status == ReadinessStatus.INCOMPLETE:
+        if attention != ATTENTION_BLOCK:
+            attention = ATTENTION_ASK
+            reasons.append("Readiness gate INCOMPLETE: profile or data insufficient.")
+    # If READY, keep current attention (don't downgrade from BLOCK/REVIEW)
 
     _finalize_preflight(db, item, attention, reasons)
     return item

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 
 class _MockHandler(BaseHTTPRequestHandler):
@@ -23,7 +23,7 @@ class _MockHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
-        params = parse_qs(parsed.query)
+        parse_qs(parsed.query)
 
         routes: dict[str, callable] = {
             "/": self._page_single_basic,
@@ -74,6 +74,22 @@ class _MockHandler(BaseHTTPRequestHandler):
             "/questions/consent-optional": self._page_question_consent_optional,
             "/questions/signature": self._page_question_signature,
             "/questions/mixed": self._page_question_mixed,
+            # Phase 22 readiness scenarios
+            "/ready/basic": self._page_ready_basic,
+            "/ready/missing-phone": self._page_ready_missing_phone,
+            "/ready/missing-resume": self._page_ready_missing_resume,
+            "/ready/cover-letter-required": self._page_ready_cover_letter_required,
+            "/ready/portfolio-required": self._page_ready_portfolio_required,
+            "/ready/sponsorship-required": self._page_ready_sponsorship_required,
+            "/ready/work-auth-required": self._page_ready_work_auth_required,
+            "/ready/sensitive-question": self._page_ready_sensitive_question,
+            "/ready/contradictory": self._page_ready_contradictory,
+            "/ready/duplicate": self._page_ready_duplicate,
+            "/ready/expired-job": self._page_ready_expired_job,
+            "/ready/invalid-package": self._page_ready_invalid_package,
+            "/ready/unresolved-approval": self._page_ready_unresolved_approval,
+            "/ready/previous-uncertain": self._page_ready_previous_uncertain,
+            "/ready/fully-ready": self._page_ready_fully_ready,
         }
         handler = routes.get(path, self._page_not_found)
         handler()
@@ -973,7 +989,7 @@ setTimeout(function() {
 
     def _handle_submit(self, body: bytes) -> None:
         self.submitted_data.append({"body": body.decode("utf-8", errors="replace")})
-        parsed = urlparse(self.path)
+        urlparse(self.path)
         self._respond(302, "")
 
     def _handle_auth_check(self, body: bytes) -> None:
@@ -984,6 +1000,184 @@ setTimeout(function() {
 
     def _handle_upload(self, body: bytes) -> None:
         self._respond_json(200, {"status": "uploaded", "message": "File received"})
+
+    # ── Phase 22 readiness scenarios ──────────────────────────────────────
+
+    def _page_ready_basic(self) -> None:
+        html = """<html><body>
+        <h1>Basic Application</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Phone<input name="phone" type="tel" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_missing_phone(self) -> None:
+        html = """<html><body>
+        <h1>Application - No Phone</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_missing_resume(self) -> None:
+        html = """<html><body>
+        <h1>Application - Resume Required</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Resume<input type="file" name="resume" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_cover_letter_required(self) -> None:
+        html = """<html><body>
+        <h1>Application - Cover Letter Required</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Cover Letter<textarea name="cover_letter" required></textarea></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_portfolio_required(self) -> None:
+        html = """<html><body>
+        <h1>Application - Portfolio Required</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Portfolio URL<input name="portfolio_url" type="url" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_sponsorship_required(self) -> None:
+        html = """<html><body>
+        <h1>Application - Sponsorship Required</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Will you require sponsorship?
+                <select name="sponsorship" required>
+                    <option value="">Select</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                </select>
+            </label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_work_auth_required(self) -> None:
+        html = """<html><body>
+        <h1>Application - Work Auth Required</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Are you authorized to work in the US?
+                <select name="work_authorization" required>
+                    <option value="">Select</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                </select>
+            </label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_sensitive_question(self) -> None:
+        html = """<html><body>
+        <h1>Application - Sensitive Question</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>What is your gender?
+                <select name="gender">
+                    <option value="">Select</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                    <option value="prefer_not_to_say">Prefer not to say</option>
+                </select>
+            </label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_contradictory(self) -> None:
+        html = """<html><body>
+        <h1>Application - Contradictory Data</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>City<input name="city" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_duplicate(self) -> None:
+        html = """<html><body>
+        <h1>Application - Duplicate</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_expired_job(self) -> None:
+        html = """<html><body>
+        <h1>This job has been closed</h1>
+        <p>This position is no longer available.</p>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_invalid_package(self) -> None:
+        html = """<html><body>
+        <h1>Application - Invalid Package</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_unresolved_approval(self) -> None:
+        html = """<html><body>
+        <h1>Application - Needs Approval</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_previous_uncertain(self) -> None:
+        html = """<html><body>
+        <h1>Application - Previous Uncertain</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
+
+    def _page_ready_fully_ready(self) -> None:
+        html = """<html><body>
+        <h1>Application - Fully Ready</h1>
+        <form>
+            <label>Full Name<input name="full_name" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Phone<input name="phone" type="tel" required></label>
+            <label>Resume<input type="file" name="resume"></label>
+        </form>
+        </body></html>"""
+        self._respond_html(html)
 
     # ── misc ────────────────────────────────────────────────────────────
 
