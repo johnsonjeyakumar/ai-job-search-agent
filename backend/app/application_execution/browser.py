@@ -476,7 +476,7 @@ class PlaywrightBrowserDriver:
         fields: list[DetectedField] = []
         for form in page.query_selector_all("form"):
             boxes = form.query_selector_all(
-                "input:not([type=hidden]):not([type=submit]):not([type=button]), "
+                "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=file]), "
                 "textarea, select"
             )
             submit_buttons = form.query_selector_all(
@@ -493,17 +493,43 @@ class PlaywrightBrowserDriver:
                 if kind == "input":
                     kind = (
                         "text"
-                        if input_type in (None, "text", "email", "tel", "date")
+                        if input_type in (None, "text", "email", "tel", "date", "number", "url")
                         else input_type
                     )
                 required = bool(box.get_attribute("required"))
                 options: list[str] = []
                 if kind == "select":
                     options = box.evaluate(
-                        "() => Array.from(document.querySelectorAll('option'))"
+                        "() => Array.from(this.querySelectorAll('option'))"
                         ".map(o => o.textContent.trim()).filter(Boolean)"
                     )
-                key = f"el{len(fields) + 1}-{input_type or 'text'}"
+                elif kind == "radio":
+                    group_name = box.get_attribute("name") or ""
+                    if group_name and not any(
+                        f.label == label and f.kind == "radio" for f in fields
+                    ):
+                        options = box.evaluate(
+                            """(el) => {
+                                const name = el.getAttribute('name');
+                                if (!name) return [];
+                                return Array.from(
+                                    document.querySelectorAll('input[type=radio][name="' + name + '"]')
+                                ).map(r => {
+                                    const lbl = document.querySelector('label[for="' + r.id + '"]');
+                                    return lbl ? lbl.textContent.trim() : r.value;
+                                }).filter(Boolean);
+                            }"""
+                        )
+                elif kind == "checkbox":
+                    pass  # no options for checkbox
+                elif kind == "number":
+                    pass  # numeric input
+                elif kind == "date":
+                    pass  # date input
+                elif kind == "url":
+                    pass  # url input
+
+                key = f"el{len(fields) + 1}-{input_type or kind}"
                 fields.append(
                     DetectedField(
                         key=key,
@@ -523,15 +549,23 @@ class PlaywrightBrowserDriver:
                 continue
             break
 
-        resumes = page.query_selector_all("input[type=file]")
-        if resumes:
-            key = f"resume-file-{len(resumes)}"
-            self._resume_input = resumes[0]
-            label = self._label_for(resumes[0])
+        # Detect file inputs
+        file_inputs = page.query_selector_all("input[type=file]")
+        for fi in file_inputs:
+            key = f"file-{fi.get_attribute('name') or 'upload'}"
+            label = self._label_for(fi) or "File"
+            accept = fi.get_attribute("accept") or ""
             fields.append(
-                DetectedField(key=key, label=label or "Resume", kind="file", required=True)
+                DetectedField(
+                    key=key,
+                    label=label,
+                    kind="file",
+                    required=bool(fi.get_attribute("required")),
+                )
             )
-            self._elements[key] = resumes[0]
+            self._elements[key] = fi
+            if self._resume_input is None:
+                self._resume_input = fi
         return fields
 
     def _label_for(self, box, form=None) -> str:
@@ -559,10 +593,46 @@ class PlaywrightBrowserDriver:
         if box is None:
             return FillResult(key=target_key, status="UNKNOWN", message="Field not found.")
         try:
-            if box.evaluate("(el) => el.tagName.toLowerCase() === 'select'"):
+            tag = box.evaluate("(el) => el.tagName.toLowerCase()")
+            input_type = (box.get_attribute("type") or "text").lower()
+
+            if tag == "select":
                 box.select_option(label=value)
-            elif box.evaluate("(el) => el.type === 'radio' or el.type === 'checkbox'"):
-                box.check()
+            elif input_type == "radio":
+                group_name = box.get_attribute("name")
+                value_lower = value.strip().lower()
+                clicked = box.evaluate(
+                    """(val) => {
+                        const name = this.getAttribute('name');
+                        const radios = document.querySelectorAll('input[type=radio][name="' + name + '"]');
+                        for (const r of radios) {
+                            const lbl = document.querySelector('label[for="' + r.id + '"]');
+                            const txt = (lbl ? lbl.textContent.trim() : r.value).toLowerCase();
+                            if (txt === val.toLowerCase() || r.value.toLowerCase() === val.toLowerCase()) {
+                                r.checked = true;
+                                r.dispatchEvent(new Event('change', {bubbles: true}));
+                                return true;
+                            }
+                        }
+                        return false;
+                    }""",
+                    value,
+                )
+                if not clicked:
+                    return FillResult(
+                        key=target_key, status="REQUIRES_REVIEW",
+                        message=f"Radio value '{value}' not found in group '{group_name}'.",
+                    )
+            elif input_type == "checkbox":
+                should_check = value.strip().lower() in ("true", "yes", "1", "on", "checked")
+                is_checked = box.is_checked()
+                if should_check != is_checked:
+                    box.check() if should_check else box.uncheck()
+            elif input_type == "file":
+                return FillResult(
+                    key=target_key, status="REQUIRES_REVIEW",
+                    message="Use upload_file() for file inputs.",
+                )
             else:
                 box.fill(value)
         except Exception as exc:  # noqa: BLE001 - driver boundary, report to executor
@@ -579,6 +649,61 @@ class PlaywrightBrowserDriver:
         except Exception as exc:  # noqa: BLE001
             return FillResult(status="REQUIRES_REVIEW", message=str(exc))
         return FillResult(key="__resume__", status="KNOWN", value=file_name, message="Uploaded.")
+
+    def upload_file(self, target_key: str, data: bytes, file_name: str, content_type: str = "application/pdf") -> FillResult:
+        box = self._elements.get(target_key)
+        if box is None:
+            return FillResult(key=target_key, status="UNKNOWN", message="File input not found.")
+        try:
+            box.set_input_files(
+                files={"name": file_name, "mimeType": content_type, "buffer": data}
+            )
+        except Exception as exc:  # noqa: BLE001
+            return FillResult(key=target_key, status="REQUIRES_REVIEW", message=str(exc))
+        return FillResult(key=target_key, status="KNOWN", value=file_name, message="Uploaded.")
+
+    def click(self, target_key: str) -> FillResult:
+        box = self._elements.get(target_key)
+        if box is None:
+            return FillResult(key=target_key, status="UNKNOWN", message="Element not found.")
+        try:
+            box.click()
+        except Exception as exc:  # noqa: BLE001
+            return FillResult(key=target_key, status="REQUIRES_REVIEW", message=str(exc))
+        return FillResult(key=target_key, status="KNOWN", message="Clicked.")
+
+    def get_text(self, selector: str = "body") -> str:
+        el = self._page.query_selector(selector)
+        return el.inner_text() if el else ""
+
+    def get_attribute(self, target_key: str, attr: str) -> str | None:
+        box = self._elements.get(target_key)
+        if box is None:
+            return None
+        return box.get_attribute(attr)
+
+    def is_checked(self, target_key: str) -> bool | None:
+        box = self._elements.get(target_key)
+        if box is None:
+            return None
+        try:
+            return box.is_checked()
+        except Exception:
+            return None
+
+    def get_selected_values(self, target_key: str) -> list[str]:
+        box = self._elements.get(target_key)
+        if box is None:
+            return []
+        try:
+            tag = box.evaluate("(el) => el.tagName.toLowerCase()")
+            if tag == "select":
+                return box.evaluate(
+                    "() => Array.from(this.selectedOptions).map(o => o.textContent.trim())"
+                )
+        except Exception:
+            pass
+        return []
 
     def detect_captcha(self) -> bool:
         page = self._page
