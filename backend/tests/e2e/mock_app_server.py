@@ -46,6 +46,34 @@ class _MockHandler(BaseHTTPRequestHandler):
             "/stale-field": self._page_stale_field,
             "/autocomplete": self._page_autocomplete,
             "/autocomplete-suggestions": self._api_autocomplete_suggestions,
+            # Phase 19 submission verification scenarios
+            "/confirm-with-ref": self._page_confirm_with_reference,
+            "/confirm-no-ref": self._page_confirm_no_reference,
+            "/uncertain-submit": self._page_uncertain_submit,
+            "/rejected": self._page_rejected,
+            "/duplicate-warning": self._page_duplicate_warning,
+            "/delayed-confirm": self._page_delayed_confirm,
+            "/network-error": self._page_network_error,
+            # Phase 20 preflight scenarios
+            "/job-active": self._page_job_active,
+            "/job-closed": self._page_job_closed,
+            "/job-removed": self._page_job_removed,
+            "/job-expired-deadline": self._page_job_expired_deadline,
+            # Phase 21 question scenarios
+            "/questions/normal": self._page_question_normal,
+            "/questions/work-auth": self._page_question_work_auth,
+            "/questions/sponsorship": self._page_question_sponsorship,
+            "/questions/experience-knockout": self._page_question_experience_knockout,
+            "/questions/relocation": self._page_question_relocation,
+            "/questions/availability": self._page_question_availability,
+            "/questions/salary": self._page_question_salary,
+            "/questions/demographic": self._page_question_demographic,
+            "/questions/declaration": self._page_question_declaration,
+            "/questions/attestation": self._page_question_attestation,
+            "/questions/consent-required": self._page_question_consent_required,
+            "/questions/consent-optional": self._page_question_consent_optional,
+            "/questions/signature": self._page_question_signature,
+            "/questions/mixed": self._page_question_mixed,
         }
         handler = routes.get(path, self._page_not_found)
         handler()
@@ -531,6 +559,415 @@ setTimeout(function() {
         ]
         matches = [s for s in suggestions if query in s.lower()] if query else suggestions
         self._respond_json(200, {"suggestions": matches[:5]})
+
+    # ── Phase 19: submission verification scenarios ─────────────────────
+
+    def _page_confirm_with_reference(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application Confirmed</title></head>
+<body>
+<h1>Thank You for Your Application!</h1>
+<div id="confirmation">
+  <p>Your application has been submitted successfully.</p>
+  <p>Application ID: APP-2026-98765</p>
+  <p>Confirmation Number: 482917</p>
+  <p>We will review your application and get back to you within 5 business days.</p>
+</div>
+</body></html>""")
+
+    def _page_confirm_no_reference(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Submission Received</title></head>
+<body>
+<h1>Application Received</h1>
+<div id="confirmation">
+  <p>Thank you for your application! We have received it and will be in touch.</p>
+  <p>Please check your email for updates.</p>
+</div>
+</body></html>""")
+
+    def _page_uncertain_submit(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Status</title></head>
+<body>
+<h1>Application Status</h1>
+<div id="status">
+  <p>Your application is under review. We will contact you if there are updates.</p>
+</div>
+</body></html>""")
+
+    def _page_rejected(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application Status</title></head>
+<body>
+<h1>Application Update</h1>
+<div id="status">
+  <p>We regret to inform you that your application was not selected for this position.</p>
+  <p>The position has been filled by another candidate.</p>
+  <p>We encourage you to apply for other suitable positions.</p>
+</div>
+</body></html>""")
+
+    def _page_duplicate_warning(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Duplicate Detected</title></head>
+<body>
+<h1>Application Already Exists</h1>
+<div id="status">
+  <p>You have already applied for this position.</p>
+  <p>Your previous application (ID: APP-2026-11111) is being reviewed.</p>
+  <p>Please do not submit a duplicate application.</p>
+</div>
+</body></html>""")
+
+    def _page_delayed_confirm(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Thank You</title></head>
+<body>
+<h1>Thank You!</h1>
+<div id="status">
+  <p>Application submitted successfully.</p>
+  <p>Reference: REF-2026-55555</p>
+</div>
+</body></html>""")
+
+    def _page_network_error(self) -> None:
+        self._respond(500, """<!DOCTYPE html>
+<html><head><title>Server Error</title></head>
+<body>
+<h1>Internal Server Error</h1>
+<p>The server encountered an error. Please try again later.</p>
+</body></html>""")
+
+    # ── Phase 20: preflight scenarios ────────────────────────────────────
+
+    def _page_job_active(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Software Engineer - Active</title></head>
+<body>
+<h1>Software Engineer at TechCorp</h1>
+<p>We are hiring a Software Engineer. Apply now!</p>
+<form action="/submit" method="post">
+  <input name="name" type="text" placeholder="Your name">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_job_closed(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Job Closed</title></head>
+<body>
+<h1>Software Engineer at TechCorp</h1>
+<p>This position has been filled. We are no longer accepting applications.</p>
+<p>Please check our other open positions.</p>
+</body></html>""")
+
+    def _page_job_removed(self) -> None:
+        self._respond(404, """<!DOCTYPE html>
+<html><head><title>Page Not Found</title></head>
+<body>
+<h1>404 - Job Not Found</h1>
+<p>This job posting has been removed or no longer exists.</p>
+</body></html>""")
+
+    def _page_job_expired_deadline(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Applications Closed</title></head>
+<body>
+<h1>Software Engineer at TechCorp</h1>
+<p>This job has expired. The application deadline has passed.</p>
+<p>We are no longer accepting applications for this position.</p>
+</body></html>""")
+
+    # ── Phase 21: question scenarios ────────────────────────────────────
+
+    def _page_question_normal(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Normal Questions</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Full Name</label>
+  <input name="full_name" type="text" placeholder="Your full name">
+  <label>Email</label>
+  <input name="email" type="email" placeholder="Your email">
+  <label>Phone</label>
+  <input name="phone" type="tel" placeholder="Your phone">
+  <label>Years of Experience</label>
+  <input name="years_experience" type="number" placeholder="Years">
+  <label>Why are you interested in this role?</label>
+  <textarea name="cover_letter" placeholder="Tell us why..."></textarea>
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_work_auth(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Work Authorization</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Are you legally authorized to work in the United States?</label>
+  <select name="work_auth">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Will you now or in the future require sponsorship?</label>
+  <select name="sponsorship">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_sponsorship(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Sponsorship</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Do you require visa sponsorship?</label>
+  <select name="sponsorship">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Will you need sponsorship in the future?</label>
+  <select name="future_sponsorship">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_experience_knockout(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Experience Knockout</title></head>
+<body>
+<h1>Apply for Senior Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Do you have at least 5 years of experience with Python?</label>
+  <select name="python_experience">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Do you have at least 3 years of experience with React?</label>
+  <select name="react_experience">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Can you work weekends?</label>
+  <select name="weekends">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_relocation(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Relocation</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Are you willing to relocate to San Francisco?</label>
+  <select name="relocation">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Can you work from another location?</label>
+  <select name="remote">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_availability(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Availability</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>When can you start?</label>
+  <input name="start_date" type="date">
+  <label>Are you available to start immediately?</label>
+  <select name="immediate">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_salary(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Salary</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Expected Salary</label>
+  <input name="salary" type="text" placeholder="e.g. 120000">
+  <label>Desired Compensation</label>
+  <input name="compensation" type="text" placeholder="e.g. $120,000/year">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_demographic(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Demographic</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>What is your gender?</label>
+  <select name="gender">
+    <option value="male">Male</option>
+    <option value="female">Female</option>
+    <option value="non-binary">Non-binary</option>
+    <option value="prefer-not">Prefer not to say</option>
+  </select>
+  <label>What is your race/ethnicity?</label>
+  <select name="race">
+    <option value="white">White</option>
+    <option value="black">Black or African American</option>
+    <option value="hispanic">Hispanic or Latino</option>
+    <option value="asian">Asian</option>
+    <option value="other">Other</option>
+    <option value="prefer-not">Prefer not to say</option>
+  </select>
+  <label>Are you a veteran?</label>
+  <select name="veteran">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+    <option value="prefer-not">Prefer not to say</option>
+  </select>
+  <label>Do you have a disability?</label>
+  <select name="disability">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+    <option value="prefer-not">Prefer not to say</option>
+  </select>
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_declaration(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Declaration</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>I certify that the information provided is accurate and complete.</label>
+  <input name="certify" type="checkbox" value="true">
+  <label>I confirm that the information above is true to the best of my knowledge.</label>
+  <input name="confirm" type="checkbox" value="true">
+  <label>I agree to the terms and conditions.</label>
+  <input name="terms" type="checkbox" value="true">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_attestation(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Attestation</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>I attest that I have not been convicted of a felony.</label>
+  <input name="attest_felony" type="checkbox" value="true">
+  <label>I attest that all information provided is true and accurate.</label>
+  <input name="attest_true" type="checkbox" value="true">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_consent_required(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Required Consent</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>I agree to the application privacy notice.</label>
+  <input name="privacy" type="checkbox" value="true">
+  <label>I consent to the processing of my personal data.</label>
+  <input name="data_processing" type="checkbox" value="true">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_consent_optional(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Optional Consent</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>I agree to receive marketing emails.</label>
+  <input name="marketing" type="checkbox" value="true">
+  <label>I consent to receive promotional updates about new positions.</label>
+  <input name="promotional" type="checkbox" value="true">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_signature(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Electronic Signature</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Type your full legal name as your electronic signature:</label>
+  <input name="electronic_signature" type="text" placeholder="Full legal name">
+  <label>I acknowledge that this constitutes my electronic signature.</label>
+  <input name="signature_ack" type="checkbox" value="true">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
+
+    def _page_question_mixed(self) -> None:
+        self._respond(200, """<!DOCTYPE html>
+<html><head><title>Application - Mixed Questions</title></head>
+<body>
+<h1>Apply for Software Engineer</h1>
+<form action="/submit" method="post">
+  <label>Full Name</label>
+  <input name="full_name" type="text" placeholder="Your full name">
+  <label>Email</label>
+  <input name="email" type="email" placeholder="Your email">
+  <label>Are you legally authorized to work in the United States?</label>
+  <select name="work_auth">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Do you require visa sponsorship?</label>
+  <select name="sponsorship">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Do you have at least 5 years of experience with Python?</label>
+  <select name="python_exp">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Are you willing to relocate?</label>
+  <select name="relocation">
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+  <label>Expected Salary</label>
+  <input name="salary" type="text" placeholder="e.g. 120000">
+  <label>I certify that the information provided is accurate.</label>
+  <input name="certify" type="checkbox" value="true">
+  <label>Type your full legal name as your electronic signature:</label>
+  <input name="electronic_signature" type="text" placeholder="Full legal name">
+  <label>I agree to receive marketing emails.</label>
+  <input name="marketing" type="checkbox" value="true">
+  <button type="submit">Apply Now</button>
+</form>
+</body></html>""")
 
     # ── POST handlers ───────────────────────────────────────────────────
 

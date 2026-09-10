@@ -1097,22 +1097,36 @@ def _preflight(
 
 
 def _duplicate_submission(db: Session, package) -> str | None:
+    """Check for duplicate applications before submitting.
+
+    Uses the structured duplicate detection from submission_verify.py.
+    Returns a reason string if duplicate detected, None if safe to submit.
+    """
+    from app.application_execution.submission_verify import (
+        check_duplicate,
+        DuplicateVerdict,
+    )
     from app.models.application import Application
     from app.models.application_execution import ApplicationExecution
 
+    # Gather existing applications for this job
+    existing_apps = []
     prev_application = db.scalar(
         select(Application)
         .where(Application.job_id == package.job_id)
         .order_by(Application.created_at.desc())
         .limit(1)
     )
-    if prev_application is not None and prev_application.status in base.LOGGED_IN_STATUSES:
-        return (
-            f"A submission for this job is already tracked "
-            f"(application #{prev_application.id}, status '{prev_application.status}'). "
-            "Execution blocked to avoid a duplicate application."
-        )
+    if prev_application is not None:
+        existing_apps.append({
+            "id": prev_application.id,
+            "job_id": prev_application.job_id,
+            "lifecycle_status": prev_application.lifecycle_status,
+            "status": prev_application.status,
+        })
 
+    # Gather existing executions for this package
+    existing_execs = []
     prior = db.scalar(
         select(ApplicationExecution)
         .where(ApplicationExecution.package_id == package.id)
@@ -1121,11 +1135,21 @@ def _duplicate_submission(db: Session, package) -> str | None:
         .limit(1)
     )
     if prior is not None:
-        return (
-            f"A prior execution (run #{prior.id}) already ended in "
-            f"'{prior.status}' for this package. Execution blocked to avoid "
-            "a duplicate application."
-        )
+        existing_execs.append({
+            "id": prior.id,
+            "status": prior.status,
+        })
+
+    result = check_duplicate(
+        job_id=package.job_id,
+        existing_applications=existing_apps,
+        existing_executions=existing_execs,
+    )
+
+    if result.verdict == DuplicateVerdict.ALREADY_APPLIED:
+        return result.reason
+    if result.verdict == DuplicateVerdict.DUPLICATE_SUSPECTED:
+        return result.reason
     return None
 
 
@@ -1233,6 +1257,13 @@ def _handle_submission_result(
     result: base.SubmissionResult,
 ) -> ApplicationExecution:
     from app.models.application_package import ApplicationPackage
+    from app.application_execution.submission_verify import (
+        detect_confirmation,
+        extract_reference_id,
+        FailureType,
+        SubmissionOutcome,
+        OUTCOME_TO_EXECUTION_STATUS,
+    )
 
     package = db.get(ApplicationPackage, execution.package_id)
     if result.failure:
@@ -1248,51 +1279,102 @@ def _handle_submission_result(
         _record_automation_error(
             db, package, "submit", result.message or "Submission failed."
         )
+        _record_submission_event(
+            db, execution, package,
+            outcome=SubmissionOutcome.SUBMISSION_FAILED,
+            failure_message=result.message,
+        )
         db.commit()
         return execution
 
-    # submission actually happened; decide confirmation status by evidence
-    submitted_status = (
-        base.STATUS_SUBMISSION_CONFIRMED
-        if result.confirmed
-        else base.STATUS_SUBMISSION_UNKNOWN
+    # Phase 19: use structured confirmation detection
+    evidence = detect_confirmation(
+        page_text=result.raw_text or "",
+        current_url=result.url or "",
+        previous_url=None,
+    )
+
+    # Use evidence outcome to determine status
+    submitted_status = OUTCOME_TO_EXECUTION_STATUS.get(
+        evidence.outcome, base.STATUS_SUBMISSION_UNKNOWN
     )
     verification = (
-        base.VERIFICATION_CONFIRMED if result.confirmed else base.VERIFICATION_UNKNOWN
+        base.VERIFICATION_CONFIRMED
+        if evidence.outcome == SubmissionOutcome.SUBMISSION_CONFIRMED
+        else base.VERIFICATION_UNKNOWN
+        if evidence.outcome in (SubmissionOutcome.SUBMITTED, SubmissionOutcome.SUBMISSION_UNCERTAIN)
+        else base.VERIFICATION_FAILED
     )
+
+    # Record evidence
     if result.url:
         db.add(ApplicationExecutionEvidence(
             execution_id=execution.id, kind="confirmation_url", url=result.url,
             value=result.url,
         ))
-    if result.confirmed:
+    if evidence.confirmation_text:
         db.add(ApplicationExecutionEvidence(
             execution_id=execution.id, kind="confirmation_text",
-            value=(result.raw_text or result.message or "")[:4000],
+            value=evidence.confirmation_text[:4000],
         ))
-    if result.reference:
+    if evidence.confirmation_reference_id:
         db.add(ApplicationExecutionEvidence(
-            execution_id=execution.id, kind="reference", value=result.reference,
+            execution_id=execution.id, kind="reference",
+            value=evidence.confirmation_reference_id,
         ))
+    db.add(ApplicationExecutionEvidence(
+        execution_id=execution.id, kind="confirmation_outcome",
+        value=evidence.outcome.value,
+    ))
+    db.add(ApplicationExecutionEvidence(
+        execution_id=execution.id, kind="confirmation_confidence",
+        value=evidence.confidence,
+    ))
 
     execution.submission_status = verification
-    if result.confirmed:
-        execution.confirmation_url = result.url
-    execution.confirmation_reference = result.reference
+    execution.confirmation_url = evidence.confirmation_url or result.url
+    execution.confirmation_reference = evidence.confirmation_reference_id or result.reference
     _mark_execution(db, execution.id, status=submitted_status, current_step="verify_submission")
-    _record_step(db, execution.id, "verify_submission",
-                 status="completed",
-                 message=(
-                     "Submission confirmed by explicit evidence."
-                     if result.confirmed
-                     else "Submission occurred but no confirmation evidence was found."
-                 ))
-    _record_step(db, execution.id, "capture_evidence",
-                 message="Evidence captured (confirmation markers).")
+
+    status_msg = {
+        SubmissionOutcome.SUBMISSION_CONFIRMED: "Submission confirmed by explicit evidence.",
+        SubmissionOutcome.SUBMITTED: "Submission occurred; weak confirmation signal only.",
+        SubmissionOutcome.SUBMISSION_UNCERTAIN: (
+            "Submission uncertain — no confirmation evidence found. "
+            "Do NOT retry automatically. Human review required."
+        ),
+        SubmissionOutcome.SUBMISSION_FAILED: "Submission failed.",
+        SubmissionOutcome.DUPLICATE_SUSPECTED: "Duplicate application suspected.",
+        SubmissionOutcome.BLOCKED: "Submission blocked.",
+    }
+    _record_step(
+        db, execution.id, "verify_submission",
+        status="completed",
+        message=status_msg.get(evidence.outcome, "Submission outcome recorded."),
+    )
+    _record_step(
+        db, execution.id, "capture_evidence",
+        message=(
+            f"Evidence captured: outcome={evidence.outcome.value}, "
+            f"confidence={evidence.confidence}, "
+            f"type={evidence.confirmation_type}."
+        ),
+    )
+
+    # Record submission outcome event
+    _record_submission_event(
+        db, execution, package,
+        outcome=evidence.outcome,
+        reference_id=evidence.confirmation_reference_id,
+        confirmation_url=evidence.confirmation_url,
+    )
 
     # record on the legacy tracker + duplicate protection (only real submission)
     if package is not None:
-        _upsert_application_tracker(db, package, execution, confirmed=result.confirmed)
+        _upsert_application_tracker(
+            db, package, execution,
+            confirmed=(evidence.outcome == SubmissionOutcome.SUBMISSION_CONFIRMED),
+        )
     db.commit()
     return execution
 
@@ -1435,3 +1517,46 @@ def _record_automation_error(db, package, stage: str, message: str) -> None:
         error_type="EXECUTION_FAILURE",
         message=message,
     ))
+
+
+def _record_submission_event(
+    db: Session,
+    execution: ApplicationExecution,
+    package,
+    *,
+    outcome,
+    reference_id: str | None = None,
+    confirmation_url: str | None = None,
+    failure_message: str | None = None,
+) -> None:
+    """Record a submission outcome event in execution step history.
+
+    Events are immutable — they record what happened, not what we wish
+    happened. Never fabricate success when the outcome is uncertain.
+    """
+    from app.application_execution.submission_verify import SubmissionOutcome
+
+    event_type_map = {
+        SubmissionOutcome.SUBMIT_ATTEMPTED: "SUBMISSION_ATTEMPTED",
+        SubmissionOutcome.SUBMITTED: "SUBMITTED",
+        SubmissionOutcome.SUBMISSION_CONFIRMED: "SUBMISSION_CONFIRMED",
+        SubmissionOutcome.SUBMISSION_UNCERTAIN: "SUBMISSION_UNCERTAIN",
+        SubmissionOutcome.SUBMISSION_FAILED: "SUBMISSION_FAILED",
+        SubmissionOutcome.DUPLICATE_SUSPECTED: "DUPLICATE_SUSPECTED",
+        SubmissionOutcome.BLOCKED: "BLOCKED",
+    }
+    event_type = event_type_map.get(outcome, "SUBMISSION_UNKNOWN")
+
+    parts = [f"outcome={outcome.value}"]
+    if reference_id:
+        parts.append(f"reference={reference_id}")
+    if confirmation_url:
+        parts.append(f"url={confirmation_url}")
+    if failure_message:
+        parts.append(f"reason={failure_message}")
+
+    _record_step(
+        db, execution.id, "submission_event",
+        status="completed" if outcome != SubmissionOutcome.SUBMISSION_FAILED else "error",
+        message=f"Submission event: {'; '.join(parts)}.",
+    )

@@ -27,6 +27,15 @@ class ApprovalAction(str, Enum):
     # Phase 16: file upload approval
     UPLOAD_FILE = "UPLOAD_FILE"
     AMBIGUOUS_DOCUMENT_SELECTION = "AMBIGUOUS_DOCUMENT_SELECTION"
+    # Phase 21: knockout/declaration/signature approval
+    UNKNOWN_KNOCKOUT_ANSWER = "UNKNOWN_KNOCKOUT_ANSWER"
+    SENSITIVE_ANSWER_REVIEW = "SENSITIVE_ANSWER_REVIEW"
+    DECLARATION_REVIEW = "DECLARATION_REVIEW"
+    SIGNATURE_REVIEW = "SIGNATURE_REVIEW"
+    CONTRADICTORY_ANSWER = "CONTRADICTORY_ANSWER"
+    AMBIGUOUS_QUESTION = "AMBIGUOUS_QUESTION"
+    DOES_NOT_MEET_REQUIREMENT = "DOES_NOT_MEET_REQUIREMENT"
+    CONSENT_REVIEW = "CONSENT_REVIEW"
 
 
 class ApprovalStatus(str, Enum):
@@ -65,6 +74,11 @@ class ApprovalPolicy:
         ApprovalAction.SUBMIT_APPLICATION,
         ApprovalAction.HANDLE_CAPTCHA,
         ApprovalAction.ABORT_APPLICATION,
+        ApprovalAction.UNKNOWN_KNOCKOUT_ANSWER,
+        ApprovalAction.DECLARATION_REVIEW,
+        ApprovalAction.SIGNATURE_REVIEW,
+        ApprovalAction.CONTRADICTORY_ANSWER,
+        ApprovalAction.DOES_NOT_MEET_REQUIREMENT,
     ])
 
     # Require approval if sensitivity is this level or higher

@@ -1,8 +1,17 @@
-"""Evidence-bound answer generation engine (Phase 12).
+"""Evidence-bound answer generation engine (Phase 12 + Phase 21).
 
 Generates application answers by matching questions to verified profile data
 and memory. Answers are always evidence-bound — AI may only provide wording,
 never invent facts. Sensitive answers require explicit verification.
+
+Phase 21 adds:
+- Answer source priority (5 levels)
+- Confidence states (VERIFIED, DERIVED_VERIFIED, AMBIGUOUS, MISSING, UNSAFE, CONTRADICTORY)
+- Contradiction detection between profile sources
+- Knockout-aware answer generation
+- Declaration/attestation handling
+- Electronic signature safety
+- Does-not-meet handling
 """
 from __future__ import annotations
 
@@ -13,17 +22,21 @@ from app.application_execution.memory import (
     _tokens,
 )
 from app.application_execution.question_handler import (
+    AnswerConfidence,
+    QuestionClass,
     QuestionClassification,
     classify_question,
+    compare_experience_requirement,
 )
 
 # ---------------------------------------------------------------------------
-# Evidence levels
+# Evidence levels (expanded)
 # ---------------------------------------------------------------------------
-EVIDENCE_EXACT = "EXACT"          # Direct profile field match
-EVIDENCE_DERIVED = "DERIVED"      # Computed from profile data
-EVIDENCE_AI_WORDING = "AI_WORDING" # AI provides wording for verified facts
-EVIDENCE_UNVERIFIED = "UNVERIFIED" # No evidence found
+EVIDENCE_EXACT = "EXACT"            # Direct profile field match
+EVIDENCE_DERIVED = "DERIVED"        # Computed from profile data
+EVIDENCE_AI_WORDING = "AI_WORDING"  # AI provides wording for verified facts
+EVIDENCE_UNVERIFIED = "UNVERIFIED"  # No evidence found
+EVIDENCE_CONTRADICTORY = "CONTRADICTORY"  # Data sources conflict
 
 
 @dataclass
@@ -34,9 +47,14 @@ class GeneratedAnswer:
     evidence_level: str = EVIDENCE_UNVERIFIED
     evidence_sources: list[str] = field(default_factory=list)
     confidence: float = 0.0
+    confidence_state: str = AnswerConfidence.MISSING.value
     needs_review: bool = False
     review_reason: str | None = None
     can_auto_fill: bool = False
+    question_class: str = QuestionClass.NORMAL.value
+    is_knockout: bool = False
+    does_not_meet: bool = False
+    contradiction_detail: str | None = None
 
 
 @dataclass
@@ -49,6 +67,7 @@ class AnswerGenerationResult:
     needs_user_input: bool = False
     is_blocked: bool = False
     block_reason: str | None = None
+    confidence_state: str = AnswerConfidence.MISSING.value
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +84,16 @@ class ProfileDataProvider:
         """Get a profile value by key."""
         value = self._profile.get(key)
         return str(value) if value is not None else default
+
+    def get_numeric(self, key: str) -> float | None:
+        """Get a numeric profile value."""
+        value = self._profile.get(key)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
 
     def get_list(self, key: str) -> list[str]:
         """Get a list value from profile."""
@@ -118,6 +147,8 @@ def _match_profile_field(
         "GRADUATION_YEAR": ["graduation_year"],
         "WORK_AUTHORIZATION": ["work_authorization", "authorization"],
         "SPONSORSHIP_REQUIRED": ["sponsorship_required"],
+        "RELOCATION": ["relocation", "relocation_willing"],
+        "AVAILABILITY": ["availability", "start_date", "available_from"],
     }
 
     field_keys = PROFILE_FIELD_MAP.get(canonical, [])
@@ -170,6 +201,43 @@ def _match_by_content(
 
 
 # ---------------------------------------------------------------------------
+# Contradiction detection
+# ---------------------------------------------------------------------------
+
+def detect_contradiction(
+    answers: list[dict],
+) -> tuple[bool, str]:
+    """Detect contradictions between answer sources.
+
+    Each answer dict should have: value, source, confidence.
+
+    Returns (has_contradiction, detail).
+    """
+    if len(answers) < 2:
+        return False, ""
+
+    # Group by normalized value
+    value_groups: dict[str, list[dict]] = {}
+    for ans in answers:
+        val = str(ans.get("value", "")).strip().lower()
+        if val:
+            value_groups.setdefault(val, []).append(ans)
+
+    # If all answers are the same, no contradiction
+    if len(value_groups) <= 1:
+        return False, ""
+
+    # Multiple different values — potential contradiction
+    sources = [a.get("source", "unknown") for a in answers]
+    values = [a.get("value", "") for a in answers]
+    detail = (
+        f"Conflicting values from {', '.join(sources)}: "
+        f"{', '.join(str(v) for v in values)}"
+    )
+    return True, detail
+
+
+# ---------------------------------------------------------------------------
 # Job context matching
 # ---------------------------------------------------------------------------
 
@@ -178,14 +246,7 @@ def _match_by_job_context(
     profile: ProfileDataProvider,
     job_context: dict,
 ) -> tuple[str | None, str, list[str]]:
-    """Match question to profile evidence using job context as a bridge.
-
-    The job context describes what the role requires. The profile provides
-    evidence of what the candidate has. The overlap between the two
-    produces evidence-bound, job-specific answers.
-
-    Returns (value, evidence_level, sources). None if no evidence found.
-    """
+    """Match question to profile evidence using job context as a bridge."""
     job_title = str(job_context.get("title") or "").lower()
     job_description = str(job_context.get("description") or "").lower()
     job_requirements = job_context.get("requirements") or []
@@ -247,7 +308,7 @@ def _match_by_job_context(
 
 
 # ---------------------------------------------------------------------------
-# Answer generation
+# Answer generation (expanded Phase 21)
 # ---------------------------------------------------------------------------
 
 def generate_answer(
@@ -255,22 +316,50 @@ def generate_answer(
     memory: MemoryStore,
     profile: ProfileDataProvider,
     job_context: dict | None = None,
+    memory_store: MemoryStore | None = None,
 ) -> AnswerGenerationResult:
     """Generate an answer for an application question.
 
-    Decision flow:
-    1. Classify the question
-    2. Check memory for verified answer
-    3. Try to match profile data (evidence-bound)
-    4. Generate wording if evidence exists (AI may only rephrase)
-    5. Apply sensitivity policy
-    6. Return result
+    Decision flow (5-step priority):
+    1. Explicit application-specific verified answer (memory)
+    2. Explicit profile value
+    3. Verified application memory (unverified but present)
+    4. Deterministic derived value from verified structured data
+    5. Otherwise -> REVIEW
+
+    LLM-generated text may assist interpretation but MUST NOT override
+    verified truth sources.
     """
     classification = classify_question(question)
 
-    # Step 1: Check memory for verified answer
+    # ── Step 1: Check memory for verified answer (highest priority) ────
     verified = memory.get_verified_answer(question)
     if verified:
+        # Check for contradiction with profile data
+        contradiction, detail = _check_answer_contradiction(
+            verified.answer, question, profile, memory,
+        )
+        if contradiction:
+            return AnswerGenerationResult(
+                question=question,
+                classification=classification,
+                generated_answer=GeneratedAnswer(
+                    answer=verified.answer,
+                    evidence_level=EVIDENCE_CONTRADICTORY,
+                    evidence_sources=[f"memory.{verified.normalized_question}"],
+                    confidence=0.0,
+                    confidence_state=AnswerConfidence.CONTRADICTORY.value,
+                    needs_review=True,
+                    review_reason=detail,
+                    can_auto_fill=False,
+                    question_class=classification.question_class,
+                    is_knockout=classification.is_knockout,
+                    contradiction_detail=detail,
+                ),
+                needs_user_input=True,
+                confidence_state=AnswerConfidence.CONTRADICTORY.value,
+            )
+
         return AnswerGenerationResult(
             question=question,
             classification=classification,
@@ -279,38 +368,65 @@ def generate_answer(
                 evidence_level=EVIDENCE_EXACT,
                 evidence_sources=[f"memory.{verified.normalized_question}"],
                 confidence=1.0,
+                confidence_state=AnswerConfidence.VERIFIED.value,
                 needs_review=False,
                 can_auto_fill=classification.sensitivity != "HIGH",
+                question_class=classification.question_class,
+                is_knockout=classification.is_knockout,
             ),
+            confidence_state=AnswerConfidence.VERIFIED.value,
         )
 
-    # Step 2: Check memory for any answer
-    any_answer = memory.get_answer(question)
-    if any_answer and classification.sensitivity == "LOW":
-        return AnswerGenerationResult(
-            question=question,
-            classification=classification,
-            generated_answer=GeneratedAnswer(
-                answer=any_answer.answer,
-                evidence_level=EVIDENCE_DERIVED,
-                evidence_sources=[f"memory.{any_answer.normalized_question}"],
-                confidence=0.8,
-                needs_review=True,
-                review_reason="Using unverified answer for low-sensitivity field.",
-                can_auto_fill=True,
-            ),
-        )
-
-    # Step 3: Try canonical field match
+    # ── Step 2: Check profile for canonical field match ────────────────
     from app.application_execution.base import DetectedField
     from app.application_execution.semantic_mapper import map_field_semantic
 
     detected = DetectedField(label=question, kind="text")
     mapping = map_field_semantic(detected)
 
-    if mapping.canonical:
+    # Skip profile match for signature/declaration/demographic questions
+    # These require explicit verified answers, not profile inference
+    _SKIP_PROFILE_MATCH = {
+        QuestionClass.E_SIGNATURE.value,
+        QuestionClass.LEGAL_DECLARATION.value,
+        QuestionClass.ATTESTATION.value,
+        QuestionClass.DEMOGRAPHIC.value,
+    }
+
+    if mapping.canonical and classification.question_class not in _SKIP_PROFILE_MATCH:
         value, evidence_level = _match_profile_field(mapping.canonical, profile)
         if value:
+            # Check for knockout experience comparison
+            _EXPERIENCE_KNOCKOUT_CLASSES = {
+                QuestionClass.EXPERIENCE_REQUIREMENT.value,
+                QuestionClass.KNOCKOUT.value,
+            }
+            if classification.question_class in _EXPERIENCE_KNOCKOUT_CLASSES:
+                years = profile.get_numeric("years_experience")
+                skills = profile.get_list("skills")
+                result, detail = compare_experience_requirement(question, years, skills)
+                if result == "DOES_NOT_MEET":
+                    return AnswerGenerationResult(
+                        question=question,
+                        classification=classification,
+                        generated_answer=GeneratedAnswer(
+                            answer=str(value),
+                            evidence_level=EVIDENCE_EXACT,
+                            evidence_sources=[f"profile.{mapping.canonical}"],
+                            confidence=1.0,
+                            confidence_state=AnswerConfidence.VERIFIED.value,
+                            needs_review=True,
+                            review_reason=detail,
+                            can_auto_fill=False,
+                            question_class=classification.question_class,
+                            is_knockout=True,
+                            does_not_meet=True,
+                            contradiction_detail=detail,
+                        ),
+                        needs_user_input=True,
+                        confidence_state=AnswerConfidence.VERIFIED.value,
+                    )
+
             return AnswerGenerationResult(
                 question=question,
                 classification=classification,
@@ -319,13 +435,17 @@ def generate_answer(
                     evidence_level=evidence_level,
                     evidence_sources=[f"profile.{mapping.canonical}"],
                     confidence=0.9,
+                    confidence_state=AnswerConfidence.DERIVED_VERIFIED.value,
                     needs_review=classification.sensitivity == "MEDIUM",
                     review_reason="Profile match for medium-sensitivity field.",
                     can_auto_fill=classification.sensitivity == "LOW",
+                    question_class=classification.question_class,
+                    is_knockout=classification.is_knockout,
                 ),
+                confidence_state=AnswerConfidence.DERIVED_VERIFIED.value,
             )
 
-    # Step 4: Try content-based match
+    # ── Step 3: Try content-based match ────────────────────────────────
     value, level, sources = _match_by_content(question, profile)
     if value:
         return AnswerGenerationResult(
@@ -336,13 +456,17 @@ def generate_answer(
                 evidence_level=level,
                 evidence_sources=sources,
                 confidence=0.7,
+                confidence_state=AnswerConfidence.DERIVED_VERIFIED.value,
                 needs_review=True,
                 review_reason="Content-based match requires verification.",
                 can_auto_fill=False,
+                question_class=classification.question_class,
+                is_knockout=classification.is_knockout,
             ),
+            confidence_state=AnswerConfidence.DERIVED_VERIFIED.value,
         )
 
-    # Step 5: Try job-context-based match for motivation questions
+    # ── Step 4: Try job-context-based match for motivation questions ───
     if job_context and classification.category in ("MOTIVATION", "TECHNICAL"):
         value, level, sources = _match_by_job_context(
             question, profile, job_context
@@ -356,17 +480,70 @@ def generate_answer(
                     evidence_level=level,
                     evidence_sources=sources,
                     confidence=0.75,
+                    confidence_state=AnswerConfidence.DERIVED_VERIFIED.value,
                     needs_review=True,
                     review_reason="Job-context match requires verification.",
                     can_auto_fill=False,
+                    question_class=classification.question_class,
+                    is_knockout=classification.is_knockout,
                 ),
+                confidence_state=AnswerConfidence.DERIVED_VERIFIED.value,
             )
 
-    # Step 6: No evidence found
+    # ── Step 5: No evidence found → REVIEW ────────────────────────────
     return AnswerGenerationResult(
         question=question,
         classification=classification,
         generated_answer=None,
         needs_user_input=True,
         is_blocked=False,
+        confidence_state=AnswerConfidence.MISSING.value,
     )
+
+
+def _check_answer_contradiction(
+    memory_answer: str,
+    question: str,
+    profile: ProfileDataProvider,
+    memory: MemoryStore,
+) -> tuple[bool, str]:
+    """Check if memory answer contradicts profile data."""
+    # Get profile value for same concept
+    from app.application_execution.base import DetectedField
+    from app.application_execution.semantic_mapper import map_field_semantic
+
+    detected = DetectedField(label=question, kind="text")
+    mapping = map_field_semantic(detected)
+
+    if not mapping.canonical:
+        return False, ""
+
+    profile_value, _ = _match_profile_field(mapping.canonical, profile)
+    if not profile_value:
+        return False, ""
+
+    # Normalize and compare
+    memory_norm = memory_answer.strip().lower()
+    profile_norm = profile_value.strip().lower()
+
+    if memory_norm == profile_norm:
+        return False, ""
+
+    # Check for numeric contradiction (years, salary, etc.)
+    import re
+    memory_nums = re.findall(r"\d+\.?\d*", memory_norm)
+    profile_nums = re.findall(r"\d+\.?\d*", profile_norm)
+
+    if memory_nums and profile_nums:
+        # If both have numbers but they differ significantly
+        try:
+            m_val = float(memory_nums[0])
+            p_val = float(profile_nums[0])
+            if abs(m_val - p_val) > max(m_val, p_val) * 0.3:  # >30% difference
+                return True, (
+                    f"Memory says {memory_answer}, profile says {profile_value}"
+                )
+        except ValueError:
+            pass
+
+    return False, ""

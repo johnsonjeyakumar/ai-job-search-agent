@@ -50,6 +50,18 @@ QUESTION_CATEGORY_MOTIVATION = "MOTIVATION"
 QUESTION_CATEGORY_PERSONAL = "PERSONAL"
 QUESTION_CATEGORY_TECHNICAL = "TECHNICAL"
 QUESTION_CATEGORY_UNKNOWN = "UNKNOWN"
+QUESTION_CATEGORY_KNOCKOUT = "KNOCKOUT"
+QUESTION_CATEGORY_WORK_AUTHORIZATION = "WORK_AUTHORIZATION"
+QUESTION_CATEGORY_SPONSORSHIP = "SPONSORSHIP"
+QUESTION_CATEGORY_RELOCATION = "RELOCATION"
+QUESTION_CATEGORY_COMPENSATION = "COMPENSATION"
+QUESTION_CATEGORY_SENSITIVE = "SENSITIVE"
+QUESTION_CATEGORY_DEMOGRAPHIC = "DEMOGRAPHIC"
+QUESTION_CATEGORY_LEGAL_DECLARATION = "LEGAL_DECLARATION"
+QUESTION_CATEGORY_ATTESTATION = "ATTESTATION"
+QUESTION_CATEGORY_CONSENT = "CONSENT"
+QUESTION_CATEGORY_E_SIGNATURE = "E_SIGNATURE"
+QUESTION_CATEGORY_AMBIGUOUS = "AMBIGUOUS"
 
 # Sensitive question keywords
 _SENSITIVE_KEYWORDS = {
@@ -57,6 +69,25 @@ _SENSITIVE_KEYWORDS = {
     "disability", "criminal", "convicted", "felony", "misdemeanor",
     "gender", "race", "ethnicity", "religion", "age", "marital",
     "pregnant", "military", "veteran",
+    "date of birth", "dob", "social security", "ssn", "national id",
+    "background check", "drug test", "medical", "health condition",
+    "genetic information", "citizenship", "immigration status",
+}
+
+# Demographic keywords (must never be inferred)
+_DEMOGRAPHIC_KEYWORDS = {
+    "gender", "race", "ethnicity", "religion", "disability",
+    "veteran", "military", "sexual orientation", "marital status",
+    "national origin", "color", "age", "pregnancy",
+    "genetic information", "citizenship",
+}
+
+# Declaration/attestation keywords
+_DECLARATION_KEYWORDS = {
+    "certify", "confirm", "attest", "declare", "acknowledge",
+    "understand", "agree to the terms", "true and accurate",
+    "information provided is accurate", "information above is true",
+    "electronic signature", "signature",
 }
 
 

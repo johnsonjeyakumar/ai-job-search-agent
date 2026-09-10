@@ -358,7 +358,21 @@ def run_preflight(db: Session, item_id: int) -> ApplicationQueueItem:
     8. Execution policy permits automation
     9. No existing confirmed submission
     10. No unresolved blocking conditions
+    11. Job availability recheck (Phase 20)
+    12. Deadline validation (Phase 20)
+    13. Job identity validation (Phase 20)
+    14. Package readiness (Phase 20)
+    15. Duplicate detection via Phase 19 (Phase 20)
     """
+    from app.application_execution.preflight import (
+        JobAvailability,
+        run_preflight_checks,
+    )
+    from app.application_execution.submission_verify import (
+        check_duplicate,
+        DuplicateVerdict,
+    )
+
     item = db.get(ApplicationQueueItem, item_id)
     if item is None:
         raise QueueNotFoundError(f"Queue item {item_id} not found.")
@@ -484,6 +498,88 @@ def run_preflight(db: Session, item_id: int) -> ApplicationQueueItem:
 
     # Update platform on the item
     item.platform = platform
+
+    # ── Phase 20: Extended preflight checks ──────────────────────────────
+
+    # 11. Job availability recheck (use existing freshness + job state)
+    from app.services.freshness_service import classify as freshness_classify
+    freshness = freshness_classify(job.posted_date)
+    from app.application_execution.preflight import availability_from_freshness
+    job_availability = availability_from_freshness(freshness.status)
+
+    # 12. Duplicate detection via Phase 19
+    existing_apps = []
+    prev_app = db.scalar(
+        select(Application)
+        .where(Application.job_id == job.id)
+        .order_by(Application.created_at.desc())
+        .limit(1)
+    )
+    if prev_app is not None:
+        existing_apps.append({
+            "id": prev_app.id,
+            "job_id": prev_app.job_id,
+            "lifecycle_status": prev_app.lifecycle_status,
+        })
+
+    existing_execs = []
+    prior_exec = db.scalar(
+        select(ApplicationExecution)
+        .where(ApplicationExecution.package_id == item.package_id)
+        .where(ApplicationExecution.status.in_(["SUBMITTED", "SUBMISSION_CONFIRMED", "SUBMISSION_UNKNOWN"]))
+        .order_by(ApplicationExecution.id.desc())
+        .limit(1)
+    )
+    if prior_exec is not None:
+        existing_execs.append({"id": prior_exec.id, "status": prior_exec.status})
+
+    dup_result = check_duplicate(
+        job_id=job.id,
+        existing_applications=existing_apps,
+        existing_executions=existing_execs,
+    )
+    dup_status = dup_result.verdict.value
+
+    # 13. Run composite preflight checks
+    profile_data = {}
+    if profile:
+        profile_data = {
+            "name": getattr(profile, "name", None),
+            "email": getattr(profile, "email", None),
+            "phone": getattr(profile, "phone", None),
+        }
+
+    result = run_preflight_checks(
+        job_id=job.id,
+        job_availability=job_availability,
+        job_company=job.company,
+        job_title=job.title,
+        job_url=job.url,
+        original_company=item.company_name,
+        original_title=item.job_title,
+        original_url=None,
+        application_deadline=None,
+        package_id=item.package_id,
+        package_status=package.status,
+        quality_gate=package.quality_gate,
+        selected_resume_id=package.selected_resume_id,
+        resume_exists=(resume is not None),
+        readiness=package.readiness,
+        duplicate_status=dup_status,
+        profile_data=profile_data if profile_data else None,
+        application_url=url,
+    )
+
+    # Merge Phase 20 reason codes into existing reasons
+    for code in result.reason_codes:
+        reasons.append(code)
+
+    # If Phase 20 determined non-eligible, override attention
+    if not result.eligible and attention == ATTENTION_AUTO:
+        if result.has_blockers:
+            attention = ATTENTION_BLOCK
+        elif result.needs_review:
+            attention = ATTENTION_REVIEW
 
     _finalize_preflight(db, item, attention, reasons)
     return item

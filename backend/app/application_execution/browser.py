@@ -728,6 +728,7 @@ class PlaywrightBrowserDriver:
 
     def submit(self) -> SubmissionResult:
         page = self._page
+        previous_url = page.url
         button = None
         for sel in ("button[type=submit]", "input[type=submit]", "button:has-text('Submit')"):
             button = page.query_selector(sel)
@@ -743,28 +744,28 @@ class PlaywrightBrowserDriver:
             page.wait_for_load_state("domcontentloaded", timeout=15000)
         except Exception:  # noqa: BLE001 - dashboard states vary; keep going
             pass
-        text = (page.inner_text("body") or "")[:4000]
-        confirmed_markers = (
-            "thank you",
-            "application received",
-            "application submitted",
-            "application has been submitted",
-            "we have received your application",
-            "congratulations",
-            "successfully applied",
+
+        # Phase 19: use structured confirmation detection
+        from app.application_execution.submission_verify import detect_confirmation
+
+        text = (page.inner_text("body") or "")[:8000]
+        evidence = detect_confirmation(
+            page_text=text,
+            current_url=page.url,
+            previous_url=previous_url,
         )
-        confirmed = (
-            any(m in text.lower() for m in confirmed_markers)
-            or "confirmation" in page.url.lower()
-        )
+
         return SubmissionResult(
-            confirmed=confirmed,
+            confirmed=evidence.outcome.value == "SUBMISSION_CONFIRMED",
+            failure=evidence.outcome.value == "SUBMISSION_FAILED",
+            reference=evidence.confirmation_reference_id,
             url=page.url,
-            raw_text=text[:4000],
+            raw_text=text[:8000],
             message=(
-                "Confirmation indicators found."
-                if confirmed
-                else "No confirmation marker found on the response page."
+                evidence.failure_message
+                if evidence.failure_message
+                else f"Outcome: {evidence.outcome.value} "
+                     f"(confidence: {evidence.confidence})."
             ),
         )
 
