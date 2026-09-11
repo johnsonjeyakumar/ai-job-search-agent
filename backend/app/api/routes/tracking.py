@@ -36,7 +36,7 @@ def _handle(e: Exception) -> HTTPException:
         return HTTPException(status_code=422, detail=str(e))
     if isinstance(e, InvalidStatusError):
         return HTTPException(status_code=422, detail=f"Invalid application status: {e.value!r}")
-    return HTTPException(status_code=500, detail=str(e))
+    return HTTPException(status_code=500, detail="Internal server error.")
 
 
 def _application_or_404(db: Session, application_id: int):

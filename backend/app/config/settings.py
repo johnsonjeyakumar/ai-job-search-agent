@@ -23,8 +23,9 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
-    # Abstract AI layer: "mock" is the only built-in provider in Phase 1.
-    ai_provider: str = "mock"
+    # API authentication — set API_KEY in .env for network deployments.
+    # Empty string disables auth (local-dev mode).
+    api_key: str = ""
     ai_model: str | None = None
 
     # Local file storage (resolved under PROJECT_ROOT). Swap with cloud storage later.

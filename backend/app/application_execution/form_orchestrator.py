@@ -397,7 +397,6 @@ def run_multi_step_orchestration(
         FormSessionState.CONFIRMED,
         FormSessionState.FAILED,
         FormSessionState.BLOCKED,
-        FormSessionState.COMPLETED,
         FormSessionState.READY_TO_SUBMIT,
         FormSessionState.WAITING_APPROVAL,
         FormSessionState.WAITING_USER,

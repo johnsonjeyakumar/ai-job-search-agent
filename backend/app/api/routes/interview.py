@@ -34,7 +34,7 @@ def _handle(e: Exception) -> HTTPException:
         return HTTPException(status_code=e.status_code, detail=e.message)
     if isinstance(e, ValueError):
         return HTTPException(status_code=422, detail=str(e))
-    return HTTPException(status_code=500, detail=str(e))
+    return HTTPException(status_code=500, detail="Internal server error.")
 
 
 # ---------------------------------------------------------------------------

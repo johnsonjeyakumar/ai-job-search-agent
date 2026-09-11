@@ -1444,6 +1444,11 @@ def _handle_submission_result(
             outcome=SubmissionOutcome.SUBMISSION_FAILED,
             failure_message=result.message,
         )
+        if package is not None:
+            _upsert_application_tracker(
+                db, package, execution,
+                outcome=SubmissionOutcome.SUBMISSION_FAILED,
+            )
         db.commit()
         return execution
 
@@ -1533,24 +1538,31 @@ def _handle_submission_result(
     if package is not None:
         _upsert_application_tracker(
             db, package, execution,
-            confirmed=(evidence.outcome == SubmissionOutcome.SUBMISSION_CONFIRMED),
+            outcome=evidence.outcome,
         )
     db.commit()
     return execution
 
 
 def _upsert_application_tracker(
-    db: Session, package, execution, *, confirmed: bool
+    db: Session, package, execution, *, outcome=None
 ) -> None:
     from datetime import date
 
     from sqlalchemy import select
 
+    from app.application_execution.submission_verify import (
+        OUTCOME_TO_TRACKING_STATUS,
+        SubmissionOutcome,
+    )
     from app.application_tracking import status as app_status
     from app.application_tracking.events import record_application_event
     from app.models.application import Application
     from app.models.resume import Resume
     from app.services import application_lifecycle_service
+
+    if outcome is None:
+        outcome = SubmissionOutcome.SUBMITTED
 
     row = db.scalar(
         select(Application)
@@ -1558,15 +1570,21 @@ def _upsert_application_tracker(
         .order_by(Application.id.desc())
         .limit(1)
     )
+    target_status = OUTCOME_TO_TRACKING_STATUS.get(outcome, "SUBMITTED")
+    confirmed = outcome == SubmissionOutcome.SUBMISSION_CONFIRMED
     legacy = "submitted" if confirmed else "applied"
-    target_status = (
-        "SUBMISSION_CONFIRMED" if confirmed else "SUBMITTED"
-    )
-    note = (
-        "Submission confirmed by execution."
-        if confirmed
-        else "Submission occurred; confirmation pending."
-    )
+
+    _STATUS_NOTES = {
+        SubmissionOutcome.SUBMISSION_CONFIRMED: "Submission confirmed by execution.",
+        SubmissionOutcome.SUBMITTED: "Submission occurred; confirmation pending.",
+        SubmissionOutcome.SUBMISSION_UNCERTAIN: (
+            "Submission uncertain — human review required."
+        ),
+        SubmissionOutcome.SUBMISSION_FAILED: "Submission failed at browser level.",
+        SubmissionOutcome.DUPLICATE_SUSPECTED: "Duplicate application suspected.",
+        SubmissionOutcome.BLOCKED: "Submission blocked.",
+    }
+    note = _STATUS_NOTES.get(outcome, "Submission outcome recorded.")
 
     # Snapshot the resume identity so historical apps survive later
     # deactivation/archival of the resume row.

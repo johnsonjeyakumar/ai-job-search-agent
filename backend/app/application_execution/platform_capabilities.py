@@ -313,7 +313,7 @@ class PlatformCapabilityRegistry:
             review_page_detection=CapabilityState.PARTIAL,
             confirmation_detection=CapabilityState.PARTIAL,
             reference_id_extraction=CapabilityState.PARTIAL,
-            submission_capability=SubmissionCapability.PARTIAL,
+            submission_capability=SubmissionCapability.SUPPORTED,
             duplicate_detection_support=CapabilityState.UNKNOWN,
             supported_field_kinds=list(_DEFAULT_FIELD_SUPPORT.keys()),
             limitations=[

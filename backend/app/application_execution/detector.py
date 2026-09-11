@@ -23,6 +23,7 @@ _SOURCE_PLATFORMS = {
 _BOARD_HOSTS = {
     "linkedin.com": "linkedin",
     "www.linkedin.com": "linkedin",
+    "m.linkedin.com": "linkedin",
     "www.indeed.com": "indeed",
     "indeed.com": "indeed",
     "naukri.com": "naukri",

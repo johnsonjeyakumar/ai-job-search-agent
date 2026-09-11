@@ -31,7 +31,7 @@ def _handle(e: Exception) -> HTTPException:
         return HTTPException(status_code=404, detail=str(e))
     if isinstance(e, (service.DuplicatePackageError, service.PackageNotApprovableError)):
         return HTTPException(status_code=409, detail=str(e))
-    return HTTPException(status_code=500, detail=str(e))
+    return HTTPException(status_code=500, detail="Internal server error.")
 
 
 @router.get("", response_model=list[PackageSummary])
@@ -314,7 +314,7 @@ def _handle_exec_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, exec_service.ExecutionServiceError):
         return HTTPException(status_code=exc.status_code, detail=exc.message)
-    return HTTPException(status_code=500, detail=str(exc))
+    return HTTPException(status_code=500, detail="Internal server error.")
 
 
 def _execution_message(execution) -> str:

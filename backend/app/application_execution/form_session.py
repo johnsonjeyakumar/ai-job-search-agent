@@ -57,7 +57,6 @@ class FormSessionState(str, Enum):
     CONFIRMED = "CONFIRMED"
     BLOCKED = "BLOCKED"
     FAILED = "FAILED"
-    COMPLETED = "COMPLETED"
 
 
 # ---------------------------------------------------------------------------
@@ -481,5 +480,4 @@ _TRANSITIONS: dict[FormSessionState, set[FormSessionState]] = {
     FormSessionState.CONFIRMED: set(),
     FormSessionState.BLOCKED: set(),
     FormSessionState.FAILED: set(),
-    FormSessionState.COMPLETED: set(),
 }

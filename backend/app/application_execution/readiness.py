@@ -877,7 +877,7 @@ def determine_readiness(
         )
 
     # 2. Duplicate → BLOCKED
-    if duplicate_status in ("ALREADY_APPLIED", "DUPLICATE"):
+    if duplicate_status == "ALREADY_APPLIED":
         reason_codes.append("DUPLICATE_APPLICATION")
         return ReadinessResult(
             status=ReadinessStatus.BLOCKED,
