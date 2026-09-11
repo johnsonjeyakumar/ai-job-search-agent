@@ -75,6 +75,12 @@ class ApplicationExecution(Base):
     # Snapshot of the daily budget when this run started.
     daily_budget: Mapped[dict] = mapped_column(JSONB, default=dict)
 
+    # Phase 24: Idempotency and submission boundary
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
+    submission_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_reason: Mapped[str | None] = mapped_column(Text)
+
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -121,3 +127,36 @@ class ApplicationExecutionEvidence(Base):
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class ExecutionLock(Base):
+    """Execution lock row for cross-process coordination (Phase 24).
+
+    One lock per package_id — only one worker may execute at a time.
+    Advisory locks handle the actual concurrency; this table tracks ownership
+    and heartbeat so stale locks can be detected and recovered.
+
+    Note: package_id does NOT use a FK constraint. This is a coordination
+    table, not a data relationship. The lock manager uses raw SQL anyway,
+    and FKs would force tests to create entire parent chains unnecessarily.
+    """
+
+    __tablename__ = "execution_locks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    package_id: Mapped[int] = mapped_column(
+        Integer,
+        index=True,
+        unique=True,
+    )
+    execution_id: Mapped[int | None] = mapped_column(
+        Integer,
+    )
+    owner_id: Mapped[str] = mapped_column(String(128))
+    lock_acquired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

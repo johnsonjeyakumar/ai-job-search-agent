@@ -19,7 +19,11 @@ from app.application_execution.auth import (
     map_session_state_to_action,
     requires_human_intervention,
 )
-from app.application_execution.base import STATUS_AWAITING_USER, STATUS_BLOCKED, STATUS_EXECUTION_FAILED
+from app.application_execution.base import (
+    STATUS_AWAITING_USER,
+    STATUS_BLOCKED,
+    STATUS_EXECUTION_FAILED,
+)
 from app.application_execution.checkpoint import (
     CheckpointStore,
     CheckpointType,
@@ -36,7 +40,6 @@ from app.application_execution.executor import (
 )
 from tests.mock_auth_pages import MOCK_AUTH_PAGES, MockAuthBrowserDriver
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -45,8 +48,9 @@ from tests.mock_auth_pages import MOCK_AUTH_PAGES, MockAuthBrowserDriver
 def db():
     """Use the test database from conftest.py."""
     from sqlalchemy import make_url
-    from app.config.settings import get_settings
+
     import app.models  # noqa: F401  (register all tables)
+    from app.config.settings import get_settings
 
     settings = get_settings()
     url = make_url(settings.database_url).set(database="job_agent_test")
@@ -464,6 +468,9 @@ class TestExecutorAuthIntegration:
 
         mock_driver = MockAuthBrowserDriver(MOCK_AUTH_PAGES["login-required"])
 
+        mock_lock_mgr = MagicMock()
+        mock_lock_mgr.acquire.return_value = MagicMock(outcome="ACQUIRED", owner_id="test")
+
         with patch("app.application_execution.executor.detect_platform") as mock_detect, \
              patch("app.application_execution.executor.get_adapter") as mock_adapter, \
              patch("app.application_execution.executor.create_driver", return_value=mock_driver), \
@@ -472,6 +479,7 @@ class TestExecutorAuthIntegration:
              patch("app.application_execution.executor._add_warning"), \
              patch("app.application_execution.executor._mark_execution") as mock_mark, \
              patch("app.services.job_service.get_job", return_value=job), \
+             patch("app.application_execution.idempotency_locks.get_lock_manager", return_value=mock_lock_mgr), \
              patch.object(db, "add"), \
              patch.object(db, "flush"):
 
@@ -523,6 +531,9 @@ class TestExecutorAuthIntegration:
 
         mock_driver = MockAuthBrowserDriver(MOCK_AUTH_PAGES["captcha"])
 
+        mock_lock_mgr = MagicMock()
+        mock_lock_mgr.acquire.return_value = MagicMock(outcome="ACQUIRED", owner_id="test")
+
         with patch("app.application_execution.executor.detect_platform") as mock_detect, \
              patch("app.application_execution.executor.get_adapter") as mock_adapter, \
              patch("app.application_execution.executor.create_driver", return_value=mock_driver), \
@@ -531,6 +542,7 @@ class TestExecutorAuthIntegration:
              patch("app.application_execution.executor._add_warning"), \
              patch("app.application_execution.executor._mark_execution") as mock_mark, \
              patch("app.services.job_service.get_job", return_value=job), \
+             patch("app.application_execution.idempotency_locks.get_lock_manager", return_value=mock_lock_mgr), \
              patch.object(db, "add"), \
              patch.object(db, "flush"):
 
@@ -587,6 +599,9 @@ class TestExecutorAuthIntegration:
             DetectedField(key="email", kind="text", label="Email", required=True),
         ]
 
+        mock_lock_mgr = MagicMock()
+        mock_lock_mgr.acquire.return_value = MagicMock(outcome="ACQUIRED", owner_id="test")
+
         with patch("app.application_execution.executor.detect_platform") as mock_detect, \
              patch("app.application_execution.executor.get_adapter") as mock_adapter, \
              patch("app.application_execution.executor.create_driver", return_value=mock_driver), \
@@ -595,6 +610,7 @@ class TestExecutorAuthIntegration:
              patch("app.application_execution.executor._add_warning"), \
              patch("app.application_execution.executor._mark_execution") as mock_mark, \
              patch("app.services.job_service.get_job", return_value=job), \
+             patch("app.application_execution.idempotency_locks.get_lock_manager", return_value=mock_lock_mgr), \
              patch.object(db, "add"), \
              patch.object(db, "flush"):
 

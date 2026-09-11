@@ -26,9 +26,10 @@ Phase 15 adds session/authentication awareness:
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.application_execution import base
@@ -48,6 +49,7 @@ from app.models.application_execution import (
 STEP_ORDER = [
     "detect_platform",
     "resolve_policy",
+    "capability_check",
     "preflight_check",
     "open",
     "inspect_form",
@@ -137,13 +139,13 @@ def _run_multi_page_execution(
         fill_page_fields,
         inspect_page,
         map_page_fields,
+        maybe_request_file_approval,
         navigate_to_next,
-        validate_page,
+        record_file_evidence,
+        record_fill_evidence,
         resolve_file_for_upload,
         validate_and_upload_file,
-        maybe_request_file_approval,
-        record_fill_evidence,
-        record_file_evidence,
+        validate_page,
     )
     from app.application_execution.form_session import (
         FormSession,
@@ -603,9 +605,78 @@ def run_execution(
 
     Returns the persisted execution row. Submission is *not* performed here;
     the row lands in AWAITING_APPROVAL / AWAITING_USER / BLOCKED.
+
+    Phase 24: Acquires an execution lock to prevent duplicate concurrent
+    execution of the same package. Uses PostgreSQL advisory locks for
+    cross-process safety.
     """
     # -- preflight (db-backed, no browser) -----------------------------------
     _preflight(db, package, force_duplicate=force_duplicate, budget=budget)
+
+    # -- Phase 24: execution lock --------------------------------------------
+    from app.application_execution.idempotency_locks import (
+        LockOutcome,
+        generate_idempotency_key,
+        get_lock_manager,
+    )
+
+    lock_mgr = get_lock_manager()
+    owner_id = f"worker-{uuid.uuid4().hex[:8]}"
+
+    # Determine attempt number from existing executions for this package
+    attempt_count = db.execute(
+        text("SELECT COUNT(*) FROM application_executions WHERE package_id = :pid"),
+        {"pid": package.id},
+    ).scalar() or 0
+    attempt_number = attempt_count + 1
+
+    lock_result = lock_mgr.acquire(
+        db,
+        package_id=package.id,
+        execution_id=0,  # Will be updated after execution record is created
+        owner_id=owner_id,
+    )
+
+    if lock_result.outcome == LockOutcome.ALREADY_LOCKED:
+        from app.application_execution.base import ExecutionBlockedError
+        raise ExecutionBlockedError(
+            base.STATUS_BLOCKED,
+            "EXECUTION_LOCKED",
+            f"Package {package.id} is already being executed by another worker.",
+        )
+
+    if lock_result.outcome == LockOutcome.ERROR:
+        from app.application_execution.base import ExecutionBlockedError
+        raise ExecutionBlockedError(
+            base.STATUS_BLOCKED,
+            "LOCK_ACQUISITION_FAILED",
+            f"Failed to acquire execution lock: {lock_result.message}",
+        )
+
+    # Lock acquired or stale lock recovered — generate idempotency key
+    idempotency_key = generate_idempotency_key(
+        package_id=package.id,
+        job_id=package.job_id,
+        attempt_number=attempt_number,
+    )
+
+    # Check for existing execution with same idempotency key
+    existing = db.execute(
+        text(
+            "SELECT id, status FROM application_executions "
+            "WHERE idempotency_key = :key"
+        ),
+        {"key": idempotency_key},
+    ).mappings().first()
+
+    if existing is not None:
+        from app.application_execution.base import ExecutionBlockedError
+        raise ExecutionBlockedError(
+            base.STATUS_BLOCKED,
+            "DUPLICATE_EXECUTION",
+            f"Execution {existing['id']} with same idempotency key already exists "
+            f"(status: {existing['status']}).",
+        )
 
     from app.models.preferences import Preferences
     from app.models.profile import Profile
@@ -638,18 +709,73 @@ def run_execution(
         status=base.STATUS_EXECUTING,
         current_step="open",
         daily_budget=budget or {},
+        idempotency_key=idempotency_key,
     )
     db.add(execution)
     db.flush()
+
+    # Link lock to execution
+    db.execute(
+        text(
+            "UPDATE execution_locks SET execution_id = :eid "
+            "WHERE package_id = :pid AND released_at IS NULL"
+        ),
+        {"eid": execution.id, "pid": package.id},
+    )
+    db.flush()
+
     _record_step(db, execution.id, "detect_platform",
                  message=f"{detection.label} (based on {detection.based_on}).")
     _record_step(db, execution.id, "resolve_policy",
                  message=f"Mode: {mode}. {policy.reason}")
+    _record_step(db, execution.id, "acquire_lock",
+                 message=f"Execution lock acquired. Owner: {owner_id}. "
+                         f"Attempt #{attempt_number}.")
 
     if not policy.supports_browser_automation:
         _add_warning(db, execution.id, "resolve_policy",
                      f"Platform '{detection.platform}' resolves to {mode}; "
                      "inspection only.")
+
+    # -- Phase 23: capability check -------------------------------------------
+    from app.application_execution.platform_capabilities import (
+        decide_platform_support,
+        generate_execution_plan,
+    )
+
+    cap_plan = generate_execution_plan(
+        platform=detection.platform,
+        captcha_detected=False,  # not yet checked
+    )
+    support_decision, support_reasons = decide_platform_support(cap_plan)
+
+    _record_step(
+        db, execution.id, "capability_check",
+        message=(
+            f"Platform: {detection.platform}, "
+            f"strategy: {cap_plan.strategy}, "
+            f"decision: {support_decision}."
+        ),
+    )
+
+    if support_decision == "BLOCKED":
+        for reason in cap_plan.blockers:
+            _add_warning(db, execution.id, "capability_check", reason)
+        _mark_execution(
+            db, execution.id, status=base.STATUS_BLOCKED,
+            current_step="capability_check",
+        )
+        _record_step(
+            db, execution.id, "capability_check", status="blocked",
+            message=f"Blocked: {'; '.join(cap_plan.blockers)}",
+        )
+        db.commit()
+        return execution
+
+    if cap_plan.warnings:
+        for warning in cap_plan.warnings:
+            _add_warning(db, execution.id, "capability_check", warning)
+
     if not url:
         _mark_execution(db, execution.id, status=base.STATUS_BLOCKED,
                         current_step="open")
@@ -664,6 +790,9 @@ def run_execution(
         page_info = driver.open(url)
         _record_step(db, execution.id, "open", url=page_info.get("url"),
                      message=f"Opened {page_info.get('title') or page_info.get('url')}.")
+
+        # Phase 24: heartbeat after browser open
+        lock_mgr.heartbeat(db, package_id=package.id, owner_id=owner_id)
 
         if driver.detect_captcha():
             _add_warning(db, execution.id, "open",
@@ -760,6 +889,9 @@ def run_execution(
         detected = driver.inspect_form()
         _record_step(db, execution.id, "inspect_form",
                      message=f"Detected {len(detected)} form fields.")
+
+        # Phase 24: heartbeat after form inspection
+        lock_mgr.heartbeat(db, package_id=package.id, owner_id=owner_id)
 
         # -- Phase 14: detect multi-page form -------------------------------
         heading = driver.get_heading() if hasattr(driver, "get_heading") else None
@@ -1038,6 +1170,14 @@ def run_execution(
 
         db.commit()
         return execution
+    except Exception:
+        # Phase 24: On error, release the lock so other workers can proceed
+        try:
+            lock_mgr.release(db, package_id=package.id, owner_id=owner_id)
+            db.commit()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
     finally:
         try:
             driver.close()
@@ -1103,8 +1243,8 @@ def _duplicate_submission(db: Session, package) -> str | None:
     Returns a reason string if duplicate detected, None if safe to submit.
     """
     from app.application_execution.submission_verify import (
-        check_duplicate,
         DuplicateVerdict,
+        check_duplicate,
     )
     from app.models.application import Application
     from app.models.application_execution import ApplicationExecution
@@ -1154,10 +1294,32 @@ def _duplicate_submission(db: Session, package) -> str | None:
 
 
 def submit_execution(db: Session, execution: ApplicationExecution) -> ApplicationExecution:
-    """Replay the safe steps and submit after user approval (where allowed)."""
+    """Replay the safe steps and submit after user approval (where allowed).
+
+    Phase 24: Checks the submit-attempt boundary before proceeding.
+    If a submission has already been attempted, returns early without
+    clicking submit again.
+    """
+    from app.application_execution.idempotency_locks import check_submit_boundary
     from app.models.application_package import ApplicationPackage
     from app.models.resume import Resume
     from app.services import job_service
+
+    # Phase 24: Check submit boundary
+    boundary = check_submit_boundary(db, execution_id=execution.id)
+    if not boundary["can_submit"]:
+        _record_step(
+            db, execution.id, "submit", status="blocked",
+            message=f"Submit blocked: {boundary['reason']}",
+        )
+        db.commit()
+        return execution
+
+    # Mark submit attempt BEFORE opening browser
+    from app.application_execution.idempotency_locks import mark_submit_attempted
+    mark_submit_attempted(db, execution_id=execution.id)
+    _record_step(db, execution.id, "submit",
+                 message="Submit attempt boundary entered.")
 
     package = db.get(ApplicationPackage, execution.package_id)
 
@@ -1209,9 +1371,9 @@ def submit_execution(db: Session, execution: ApplicationExecution) -> Applicatio
                 continue
 
             # Phase 17: normalize value for re-fill
-            from app.application_execution.form_orchestrator import normalize_field_value
+            from app.application_execution.base import KNOWN, DetectedField
             from app.application_execution.fields import MappedField
-            from app.application_execution.base import DetectedField, KNOWN
+            from app.application_execution.form_orchestrator import normalize_field_value
 
             # Create a temporary MappedField for normalization
             dummy_detected = DetectedField(key=key, label=key, kind=kind)
@@ -1256,14 +1418,12 @@ def _handle_submission_result(
     execution: ApplicationExecution,
     result: base.SubmissionResult,
 ) -> ApplicationExecution:
-    from app.models.application_package import ApplicationPackage
     from app.application_execution.submission_verify import (
-        detect_confirmation,
-        extract_reference_id,
-        FailureType,
-        SubmissionOutcome,
         OUTCOME_TO_EXECUTION_STATUS,
+        SubmissionOutcome,
+        detect_confirmation,
     )
+    from app.models.application_package import ApplicationPackage
 
     package = db.get(ApplicationPackage, execution.package_id)
     if result.failure:
@@ -1535,17 +1695,6 @@ def _record_submission_event(
     happened. Never fabricate success when the outcome is uncertain.
     """
     from app.application_execution.submission_verify import SubmissionOutcome
-
-    event_type_map = {
-        SubmissionOutcome.SUBMIT_ATTEMPTED: "SUBMISSION_ATTEMPTED",
-        SubmissionOutcome.SUBMITTED: "SUBMITTED",
-        SubmissionOutcome.SUBMISSION_CONFIRMED: "SUBMISSION_CONFIRMED",
-        SubmissionOutcome.SUBMISSION_UNCERTAIN: "SUBMISSION_UNCERTAIN",
-        SubmissionOutcome.SUBMISSION_FAILED: "SUBMISSION_FAILED",
-        SubmissionOutcome.DUPLICATE_SUSPECTED: "DUPLICATE_SUSPECTED",
-        SubmissionOutcome.BLOCKED: "BLOCKED",
-    }
-    event_type = event_type_map.get(outcome, "SUBMISSION_UNKNOWN")
 
     parts = [f"outcome={outcome.value}"]
     if reference_id:

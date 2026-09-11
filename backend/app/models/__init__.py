@@ -7,6 +7,7 @@ from app.models.application_execution import (
     ApplicationExecution,
     ApplicationExecutionEvidence,
     ApplicationExecutionStep,
+    ExecutionLock,
 )
 from app.models.application_package import (
     ApplicationAnswer,
@@ -67,6 +68,7 @@ __all__ = [
     "ApplicationExecution",
     "ApplicationExecutionStep",
     "ApplicationExecutionEvidence",
+    "ExecutionLock",
     "ApplicationEvent",
     "ApplicationResponse",
     "InterviewRecord",
